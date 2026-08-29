@@ -25,7 +25,8 @@ Validate the checked-out script with `make check`.
 
 ## Codex and Claude Code
 
-Install both command-line tools and their shared interface and discovery skills:
+Install both command-line tools and their shared interface, Go, and discovery
+skills:
 
 ```bash
 ./install-ai-tools.sh

@@ -17,3 +17,7 @@ npx --yes skills add jakubkrehel/skills --global \
     --agent codex claude-code --skill '*' --yes
 npx --yes skills add vercel-labs/skills@find-skills --global \
     --agent codex claude-code --yes
+npx --yes skills add https://github.com/samber/cc-skills-golang --global \
+    --agent codex claude-code \
+    --skill golang-concurrency golang-context golang-security \
+    golang-troubleshooting --yes
