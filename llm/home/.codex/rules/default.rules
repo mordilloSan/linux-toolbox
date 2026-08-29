@@ -1,7 +1,0 @@
-prefix_rule(pattern=["make", "test-frontend-browser-quiet"], decision="allow")
-prefix_rule(pattern=["make", "generate"], decision="allow")
-prefix_rule(pattern=["make", "test-quiet"], decision="allow")
-prefix_rule(pattern=["make", "setup"], decision="allow")
-prefix_rule(pattern=["make", "check-backend-quiet"], decision="allow")
-prefix_rule(pattern=["make", "check-frontend-quiet"], decision="allow")
-prefix_rule(pattern=["make", "test-backend-quiet"], decision="allow")
