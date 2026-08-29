@@ -2,6 +2,17 @@
 
 Small, standalone Linux host utilities.
 
+## Install
+
+Run the complete installer as your regular user; it prompts for `sudo` when
+installing system packages, Go, and Node.js:
+
+```bash
+./install.sh
+```
+
+This also installs Codex, Claude Code, and their shared skills.
+
 ## Ubuntu cleanup
 
 Removes Ubuntu MOTD noise and Snap, then prevents `snapd` from being installed
@@ -20,21 +31,6 @@ curl -fLO https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main/ubunt
 less ubuntu-cleanup.sh
 sudo bash ubuntu-cleanup.sh
 ```
-
-Validate all checked-out shell scripts with `make check` (ShellCheck runs when
-installed).
-
-## Codex and Claude Code
-
-Install both command-line tools and their shared interface, Go, and discovery
-skills:
-
-```bash
-./install-ai-tools.sh
-```
-
-Run the script as your regular user, not with `sudo`. It requires `curl` and
-`npx`; run `sudo bash install-node.sh` first if Node.js is not installed.
 
 ## Git and GitHub authentication
 
