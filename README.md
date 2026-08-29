@@ -34,3 +34,15 @@ skills:
 
 Run the script as your regular user, not with `sudo`. It requires `curl` and
 `npx`; run `sudo bash install-node.sh` first if Node.js is not installed.
+
+## Git and GitHub authentication
+
+Configure your global Git identity, authenticate GitHub CLI over HTTPS, and
+use GitHub CLI as Git's credential helper:
+
+```bash
+./setup-git.sh
+```
+
+Run it as your regular user. Existing name and email values are kept when you
+press Enter.
