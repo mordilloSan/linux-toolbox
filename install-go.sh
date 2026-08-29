@@ -36,6 +36,8 @@ if [[ ! -x $go_dir/bin/go ]]; then
 fi
 
 ln -sfn "$go_dir" "$current"
+# Variables intentionally expand in future login shells.
+# shellcheck disable=SC2016
 printf '%s\n' 'export PATH="/usr/local/go-versions/current/bin:$HOME/go/bin:$PATH"' \
     >/etc/profile.d/go.sh
 chmod 644 /etc/profile.d/go.sh

@@ -13,6 +13,11 @@ command -v npx >/dev/null || { echo "npx is required; run install-node.sh first.
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 curl -fsSL https://claude.ai/install.sh | bash
 
+# Installers place their launchers here; include it in this shell immediately.
+export PATH="$HOME/.local/bin:$PATH"
+command -v claude >/dev/null || { echo "Claude Code installation failed." >&2; exit 1; }
+command -v codex >/dev/null || { echo "Codex installation failed." >&2; exit 1; }
+
 claude plugin marketplace add DietrichGebert/ponytail
 claude plugin install ponytail@ponytail --yes
 codex plugin marketplace add DietrichGebert/ponytail

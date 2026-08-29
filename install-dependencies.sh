@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Common Linux Tools Instalation
+# Common Linux Tools Installation
 # 2026 Miguel Mariz (mordilloSan)
 # =============================================================================
 set -euo pipefail
@@ -17,8 +17,6 @@ readonly RED='\e[91m'
 readonly YELLOW='\e[33m'
 
 readonly LINE=" ${GREEN}───────────────────────────────────────────────────────${COLOUR_RESET}"
-readonly BULLET=" ${GREEN}-${COLOUR_RESET}"
-
 Show() {
     local status="$1"
     shift
@@ -40,116 +38,101 @@ Header() {
 
 # ---------- Distro Detection ----------
 DISTRO=""
-detect_distro() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        DISTRO="${ID:-unknown}"
-    elif [[ -f /etc/debian_version ]]; then
-        DISTRO="debian"
-    elif [[ -f /etc/redhat-release ]]; then
-        DISTRO="rhel"
-    else
-        DISTRO="unknown"
+PKG_MGR=""
+select_package_manager() {
+    local family=" $1 ${2:-} "
+    PKG_MGR=""
+
+    if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1 \
+        && [[ "$family" == *" debian "* || "$family" == *" ubuntu "* ]]; then
+        PKG_MGR=apt
+    elif command -v dnf >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1 \
+        && [[ "$family" == *" fedora "* || "$family" == *" rhel "* ]]; then
+        PKG_MGR=dnf
+    elif command -v yum >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1 \
+        && [[ "$family" == *" fedora "* || "$family" == *" rhel "* ]]; then
+        PKG_MGR=yum
     fi
 }
 
-is_debian() {
-    case "$DISTRO" in
-        ubuntu|debian|linuxmint|pop) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-is_fedora() {
-    case "$DISTRO" in
-        fedora|rhel|centos|rocky|almalinux) return 0 ;;
-        *) return 1 ;;
-    esac
+detect_distro() {
+    local ID="" ID_LIKE=""
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+    elif [[ -f /etc/debian_version ]]; then
+        ID=debian
+    elif [[ -f /etc/redhat-release ]]; then
+        ID=rhel
+    fi
+    DISTRO="${ID:-unknown}"
+    select_package_manager "$DISTRO" "$ID_LIKE"
 }
 
 # ---------- Package helpers ----------
 # Check if a package is already installed
 pkg_installed() {
-    if is_debian; then
-        dpkg -s "$1" &>/dev/null
-    elif is_fedora; then
+    if [[ "$PKG_MGR" == apt ]]; then
+        [[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null || true)" == "install ok installed" ]]
+    elif [[ "$PKG_MGR" == dnf || "$PKG_MGR" == yum ]]; then
         rpm -q "$1" &>/dev/null
+    else
+        return 1
     fi
 }
 
-# Install packages quietly — stdout hidden, stderr retained for error reporting
 pkg_install() {
-    local err
-    if is_debian; then
-        err=$(apt-get install -y -qq "$@" 2>&1 >/dev/null) || { echo "$err" >&2; return 1; }
-    elif is_fedora; then
-        err=$(dnf install -y -q "$@" 2>&1 >/dev/null) || { echo "$err" >&2; return 1; }
+    if [[ "$PKG_MGR" == apt ]]; then
+        apt-get install -y -qq "$@"
+    else
+        "$PKG_MGR" install -y -q "$@"
     fi
-}
-
-# Install a package. Tries each candidate in order until one
-# succeeds. When every candidate fails, aborts with the supplied consequence.
-# Usage: install_pkg <display_name> <debian_pkg_candidates> <fedora_pkg_candidates> [consequence]
-install_pkg() {
-    local name="$1" deb_pkgs="$2" fed_pkgs="$3" consequence="${4:-no package candidate could be installed}"
-    local pkgs="" candidate=""
-
-    if is_debian; then pkgs="$deb_pkgs"
-    elif is_fedora; then pkgs="$fed_pkgs"
-    fi
-
-    for candidate in $pkgs; do
-        if pkg_installed "$candidate"; then
-            Show 0 "${name} ${GREY}already installed${COLOUR_RESET}"
-            return 0
-        fi
-    done
-
-    for candidate in $pkgs; do
-        Show 2 "Installing ${name} (${candidate})..."
-        if pkg_install "$candidate"; then
-            Show 0 "${name} installed (${candidate})"
-            return 0
-        fi
-    done
-
-    Show 1 "${name}: installation failed — ${consequence}"
 }
 
 # ---------- Packages ----------
 install_packages() {
     Header "Installing Packages"
 
-    if ! is_debian && ! is_fedora; then
+    if [[ -z "$PKG_MGR" ]]; then
         Show 1 "Unsupported distribution: ${DISTRO}"
     fi
 
-    if is_debian; then
-        Show 2 "Updating package lists..."
-        if ! apt-get update -qq >/dev/null 2>&1; then
-            Show 1 "Failed to update package lists"
+    local packages=(git gh make tar gzip)
+    [[ "$PKG_MGR" == apt ]] && packages+=(xz-utils) || packages+=(xz)
+
+    local bootstrap=()
+    pkg_installed ca-certificates || bootstrap+=(ca-certificates)
+    if ! command -v curl >/dev/null 2>&1; then
+        bootstrap+=(curl)
+    fi
+    if ((${#bootstrap[@]})); then
+        if [[ "$PKG_MGR" == apt ]]; then
+            Show 2 "Updating package lists..."
+            apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
         fi
-        Show 0 "Package lists updated"
+        Show 2 "Installing HTTPS prerequisites..."
+        pkg_install "${bootstrap[@]}"
     fi
 
-    install_pkg "CA certificates" "ca-certificates" "ca-certificates" \
-        "trusted CA certificates enable HTTPS downloads"
-    install_pkg "curl" "curl" "curl" \
-        "curl downloads Go, nvm, and Node.js"
-    install_pkg "Git" "git" "git" \
-        "Git provides repository access"
-    install_pkg "GitHub CLI" "gh" "gh" \
-        "GitHub CLI provides GitHub access"
-    install_pkg "GNU Make" "make" "make" \
-        "GNU Make runs project setup and build targets"
-    install_pkg "Python 3" "python3" "python3" \
-        "Python 3 reads the configured Node.js version"
-    install_pkg "tar" "tar" "tar" \
-        "tar unpacks Go and Node.js"
-    install_pkg "gzip" "gzip" "gzip" \
-        "gzip unpacks Go"
-    install_pkg "XZ utilities" "xz-utils" "xz" \
-        "XZ support unpacks Node.js"
+    # GitHub's repository avoids obsolete distro builds and is signed by its keyring.
+    Show 2 "Configuring the GitHub CLI repository..."
+    if [[ "$PKG_MGR" == apt ]]; then
+        install -d -m 755 /etc/apt/keyrings /etc/apt/sources.list.d
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+            "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list
+        apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
+    else
+        install -d -m 755 /etc/yum.repos.d
+        curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo
+    fi
+    Show 0 "GitHub CLI repository configured"
+
+    Show 2 "Installing or updating ${#packages[@]} packages..."
+    pkg_install "${packages[@]}"
+    Show 0 "Packages installed"
 }
 
 # ---------- Main ----------

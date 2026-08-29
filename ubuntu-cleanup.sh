@@ -12,6 +12,16 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+if [[ ! -r /etc/os-release ]]; then
+    echo "Cannot determine the operating system (/etc/os-release is unreadable)" >&2
+    exit 1
+fi
+os_id=$(sed -n 's/^ID=//p' /etc/os-release | head -n1 | tr -d '"')
+if [[ $os_id != ubuntu ]]; then
+    echo "This script supports Ubuntu only (detected: ${os_id:-unknown})" >&2
+    exit 1
+fi
+
 say() { echo -e "\e[1;32m==>\e[0m $*"; }
 
 # ========== 1. MOTD cleanup ==========
@@ -51,8 +61,11 @@ systemctl disable --now snapd.socket snapd.service snapd.seeded.service 2>/dev/n
 
 say "Purging snapd package..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get purge -y snapd gnome-software-plugin-snap 2>/dev/null || apt-get purge -y snapd || true
-apt-get autoremove -y --purge
+purge_packages=(snapd)
+if dpkg-query -W -f='${Status}' gnome-software-plugin-snap >/dev/null 2>&1; then
+    purge_packages+=(gnome-software-plugin-snap)
+fi
+apt-get purge -y "${purge_packages[@]}"
 
 say "Removing leftover snap directories..."
 rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd

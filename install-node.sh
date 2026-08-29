@@ -27,6 +27,8 @@ nvm alias default 'lts/*'
 
 current=$(nvm current)
 ln -sfn "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
+# PATH intentionally expands in future login shells.
+# shellcheck disable=SC2016
 printf '%s\n' 'export PATH="/usr/local/nvm/versions/node/current/bin:$PATH"' \
     >/etc/profile.d/node.sh
 chmod 644 /etc/profile.d/node.sh

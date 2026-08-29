@@ -21,7 +21,8 @@ less ubuntu-cleanup.sh
 sudo bash ubuntu-cleanup.sh
 ```
 
-Validate the checked-out script with `make check`.
+Validate all checked-out shell scripts with `make check` (ShellCheck runs when
+installed).
 
 ## Codex and Claude Code
 
