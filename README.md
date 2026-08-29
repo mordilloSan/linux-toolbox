@@ -34,3 +34,21 @@ skills:
 
 Run the script as your regular user, not with `sudo`. It requires `curl` and
 `npx`; run `sudo bash install-node.sh` first if Node.js is not installed.
+
+## Release Make targets
+
+Install the shared release targets into GNU Make's global include directory:
+
+```bash
+sudo ./install-release.sh
+```
+
+Then include them from any Makefile:
+
+```make
+include release.mk
+```
+
+This adds `start-dev`, `open-pr`, and `merge-release`. It requires Git and the
+GitHub CLI. Set `DEFAULT_BASE_BRANCH` or `RELEASE_WORKFLOW` before the include
+when a repository does not use `main` and `release.yml`.
