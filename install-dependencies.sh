@@ -138,6 +138,8 @@ install_packages() {
         "curl downloads Go, nvm, and Node.js"
     install_pkg "Git" "git" "git" \
         "Git provides repository access"
+    install_pkg "GitHub CLI" "gh" "gh" \
+        "GitHub CLI provides GitHub access"
     install_pkg "GNU Make" "make" "make" \
         "GNU Make runs project setup and build targets"
     install_pkg "Python 3" "python3" "python3" \
