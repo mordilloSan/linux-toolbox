@@ -36,7 +36,7 @@ if [[ ! -x $go_dir/bin/go ]]; then
 fi
 
 ln -sfn "$go_dir" "$current"
-printf '%s\n' 'export PATH="/usr/local/go-versions/current/bin:$PATH"' \
+printf '%s\n' 'export PATH="/usr/local/go-versions/current/bin:$HOME/go/bin:$PATH"' \
     >/etc/profile.d/go.sh
 chmod 644 /etc/profile.d/go.sh
 ln -sfn "$current/bin/go" /usr/local/bin/go

@@ -10,7 +10,13 @@ fi
 
 export NVM_DIR=/usr/local/nvm
 if [[ ! -s $NVM_DIR/nvm.sh ]]; then
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh |
+    nvm_version=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://latest.nvm.sh)
+    nvm_version=${nvm_version##*/}
+    [[ $nvm_version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        echo "Invalid nvm version: $nvm_version" >&2
+        exit 1
+    }
+    curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
         PROFILE=/dev/null bash
 fi
 
