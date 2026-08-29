@@ -2,7 +2,6 @@
 
 DEFAULT_BASE_BRANCH ?= main
 RELEASE_WORKFLOW ?= release.yml
-RELEASE_CHANGELOG_SCRIPT ?= /usr/local/libexec/linux-toolbox/changelog-entry.sh
 REPO ?=
 CONFIRM ?= 1
 
@@ -37,6 +36,55 @@ define _read_and_validate_version
 	REL_BRANCH="dev/$$VERSION"
 endef
 
+define _generate_changelog
+FEATURES="" FIXES="" DOCS="" STYLE="" REFACTOR="" PERF=""; \
+TEST="" BUILD="" CI="" CHORE="" OTHER=""; \
+LOG_ARGS=(--reverse --no-merges --pretty=format:'%s%x00%h%x00%an%x00'); \
+if [ -n "$$COMMIT_RANGE" ]; then LOG_ARGS+=("$$COMMIT_RANGE"); fi; \
+while IFS= read -r -d '' message \
+  && IFS= read -r -d '' hash \
+  && IFS= read -r -d '' author; do \
+  message="$${message#$$'\n'}"; \
+  [ -z "$$message" ] && continue; \
+  [[ "$$author" == "github-actions[bot]" ]] && continue; \
+  [[ "$$message" =~ ^[Cc]hangelog$$ ]] && continue; \
+  ENTRY="* $$message ([$${hash:0:7}](https://github.com/$$REPO_NAME/commit/$$hash)) by @$$author"; \
+  if [[ "$$message" =~ ^feat(\(.*\))?: ]]; then FEATURES="$$FEATURES$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^fix(\(.*\))?: ]]; then FIXES="$$FIXES$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^docs(\(.*\))?: ]]; then DOCS="$$DOCS$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^style(\(.*\))?: ]]; then STYLE="$$STYLE$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^refactor(\(.*\))?: ]]; then REFACTOR="$$REFACTOR$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^perf(\(.*\))?: ]]; then PERF="$$PERF$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^test(\(.*\))?: ]]; then TEST="$$TEST$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^build(\(.*\))?: ]]; then BUILD="$$BUILD$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^ci(\(.*\))?: ]]; then CI="$$CI$$ENTRY"$$'\n'; \
+  elif [[ "$$message" =~ ^chore(\(.*\))?: ]]; then CHORE="$$CHORE$$ENTRY"$$'\n'; \
+  else OTHER="$$OTHER$$ENTRY"$$'\n'; fi; \
+done < <(git log "$${LOG_ARGS[@]}"); \
+[ -n "$$FEATURES" ] && printf "###  Features\n\n%s\n" "$$FEATURES"; \
+[ -n "$$FIXES" ] && printf "###  Bug Fixes\n\n%s\n" "$$FIXES"; \
+[ -n "$$PERF" ] && printf "###  Performance\n\n%s\n" "$$PERF"; \
+[ -n "$$REFACTOR" ] && printf "###  Refactoring\n\n%s\n" "$$REFACTOR"; \
+[ -n "$$DOCS" ] && printf "###  Documentation\n\n%s\n" "$$DOCS"; \
+[ -n "$$STYLE" ] && printf "###  Style\n\n%s\n" "$$STYLE"; \
+[ -n "$$TEST" ] && printf "###  Tests\n\n%s\n" "$$TEST"; \
+[ -n "$$BUILD" ] && printf "###  Build\n\n%s\n" "$$BUILD"; \
+[ -n "$$CI" ] && printf "###  CI/CD\n\n%s\n" "$$CI"; \
+[ -n "$$CHORE" ] && printf "###  Chores\n\n%s\n" "$$CHORE"; \
+[ -n "$$OTHER" ] && printf "###  Other Changes\n\n%s\n" "$$OTHER"; \
+printf "###  Contributors\n\n"; \
+if [ -n "$$COMMIT_RANGE" ]; then \
+  git log --no-merges "$$COMMIT_RANGE" --pretty=format:'* @%an' | sort -u; \
+else \
+  git log --no-merges --pretty=format:'* @%an' | sort -u; \
+fi; \
+if [ -n "$$PREV_TAG" ]; then \
+  printf "\n\n**Full Changelog**: https://github.com/$$REPO_NAME/compare/$$PREV_TAG...$$VERSION\n"; \
+else \
+  printf "\n\n**Full Changelog**: https://github.com/$$REPO_NAME/releases/tag/$$VERSION\n"; \
+fi
+endef
+
 # Regenerate the changelog-based PR body into a fresh temp file named by
 # $$PR_BODY_FILE. Requires $$VERSION; the caller removes the temp file.
 define _generate_pr_body
@@ -51,7 +99,7 @@ define _generate_pr_body
 	{ \
 	  echo "## $$VERSION — $$(date -u +%Y-%m-%d)"; \
 	  echo ""; \
-	  "$(RELEASE_CHANGELOG_SCRIPT)" "$$VERSION" "$$PREV_TAG" "$$COMMIT_RANGE" "$$REPO_NAME"; \
+	  $(call _generate_changelog); \
 	} > "$$PR_BODY_FILE"
 endef
 
@@ -447,4 +495,26 @@ merge-release:
 	  fi; \
 	}
 
-.PHONY: start-dev open-pr merge-release
+.PHONY: start-dev open-pr merge-release test-release-changelog
+
+test-release-changelog: SHELL := /bin/bash
+test-release-changelog:
+	@set -euo pipefail; \
+	test_root="$$(mktemp -d /tmp/release-changelog.XXXXXX)"; \
+	trap 'rm -rf -- "$$test_root"' EXIT; \
+	git -C "$$test_root" init -q; \
+	git -C "$$test_root" config user.name Tester; \
+	git -C "$$test_root" config user.email tester@example.com; \
+	printf base >"$$test_root/file"; \
+	git -C "$$test_root" add file; \
+	git -C "$$test_root" commit -qm 'chore: base'; \
+	git -C "$$test_root" tag v0.1.0; \
+	printf change >>"$$test_root/file"; \
+	git -C "$$test_root" commit -qam 'fix: preserve | pipe and \backslash'; \
+	output="$$(cd "$$test_root"; \
+	  VERSION=v0.2.0; PREV_TAG=v0.1.0; COMMIT_RANGE=v0.1.0..HEAD; REPO_NAME=owner/project; \
+	  $(call _generate_changelog))"; \
+	[[ "$$output" == *'###  Bug Fixes'* ]]; \
+	[[ "$$output" == *'fix: preserve | pipe and \backslash'* ]]; \
+	[[ "$$output" == *'https://github.com/owner/project/compare/v0.1.0...v0.2.0'* ]]; \
+	echo 'release changelog check passed'
