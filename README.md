@@ -23,8 +23,13 @@ sudo bash ubuntu-cleanup.sh
 
 Validate the checked-out script with `make check`.
 
-## Codex and Claude tooling
+## Codex and Claude Code
 
-Reusable project instructions, global definitions, plugins, and skills are
-archived under [`llm/`](llm/README.md). Credentials and runtime history are not
-included.
+Install both command-line tools and their shared interface and discovery skills:
+
+```bash
+./install-ai-tools.sh
+```
+
+Run the script as your regular user, not with `sudo`. It requires `curl` and
+`npx`; run `sudo bash install-node.sh` first if Node.js is not installed.
