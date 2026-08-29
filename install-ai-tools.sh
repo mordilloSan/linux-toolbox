@@ -13,6 +13,11 @@ command -v npx >/dev/null || { echo "npx is required; run install-node.sh first.
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 curl -fsSL https://claude.ai/install.sh | bash
 
+claude plugin marketplace add DietrichGebert/ponytail
+claude plugin install ponytail@ponytail --yes
+codex plugin marketplace add DietrichGebert/ponytail
+codex plugin add ponytail@ponytail
+
 npx --yes skills add jakubkrehel/skills --global \
     --agent codex claude-code --skill '*' --yes
 npx --yes skills add vercel-labs/skills@find-skills --global \
