@@ -71,8 +71,9 @@ jobs:
         run: |
           source install-dependencies.sh
           PKG_MGR=apt
-          apt-get() { printf '%s\n' "${!#}" >> "$RUNNER_TEMP/packages.log"; }
+          apt-get() { printf '%s\n' "${!#}" >> "$RUNNER_TEMP/packages.log"; echo 'raw package output'; }
           output=$(pkg_install git gh)
           grep -Fq 'Installing or updating git...' <<< "$output"
           grep -Fq 'gh installed' <<< "$output"
+          if grep -Fq 'raw package output' <<< "$output"; then exit 1; fi
           diff -u <(printf '%s\n' git gh) "$RUNNER_TEMP/packages.log"

@@ -78,7 +78,7 @@ ok "System dependencies installed"
 
 step "2/6 Go"
 "${fetch[@]}" "$base_url/install-go.sh" | sudo bash
-ok "Go installed"
+ok "$(go env GOVERSION) installed"
 
 step "3/6 Node.js"
 "${fetch[@]}" "$base_url/install-node.sh" | bash
@@ -124,3 +124,7 @@ if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 fi
 
 banner "Setup complete"
+
+if [[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]]; then
+	exec codex </dev/tty
+fi

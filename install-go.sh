@@ -46,5 +46,3 @@ printf '%s\n' 'export PATH="/usr/local/go-versions/current/bin:$HOME/go/bin:$PAT
 chmod 644 /etc/profile.d/go.sh
 ln -sfn "$current/bin/go" /usr/local/bin/go
 ln -sfn "$current/bin/gofmt" /usr/local/bin/gofmt
-
-"$current/bin/go" version

@@ -76,13 +76,18 @@ pkg_installed() {
 }
 
 pkg_install() {
-	local package
+	local package output
+	local -a installer
 	for package; do
 		Show 2 "Installing or updating ${package}..."
 		if [[ "$PKG_MGR" == apt ]]; then
-			apt-get install -y -qq "$package" >/dev/null || Show 1 "Failed to install ${package}"
+			installer=(apt-get install -y -qq "$package")
 		else
-			"$PKG_MGR" install -y -q "$package" >/dev/null || Show 1 "Failed to install ${package}"
+			installer=("$PKG_MGR" install -y -q "$package")
+		fi
+		if ! output=$("${installer[@]}" 2>&1); then
+			printf '%s\n' "$output" >&2
+			Show 1 "Failed to install ${package}"
 		fi
 		Show 0 "${package} installed"
 	done
