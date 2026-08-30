@@ -41,11 +41,22 @@ jobs:
             ln -s mock "$test_dir/bin/$command"
           done
           MOCK_CURL_LOG="$test_dir/curl.log" PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \
-            LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh |
+            LINUX_TOOLBOX_NONINTERACTIVE=1 bash < install.sh |
             grep -F "Setup complete"
           printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
             install-shell-tools.sh install-release-flow.sh install-ai-tools.sh > "$test_dir/expected.log"
           diff -u "$test_dir/expected.log" "$test_dir/curl.log"
+          mkdir "$test_dir/local"
+          cp install.sh "$test_dir/local/"
+          while read -r script; do
+            printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q >> %q\n' \
+              "$script" "$test_dir/local.log" > "$test_dir/local/$script"
+          done < "$test_dir/expected.log"
+          MOCK_CURL_LOG="$test_dir/unexpected-curl.log" PATH="$test_dir/bin:$PATH" \
+            HOME="$test_dir/home" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$test_dir/local/install.sh" |
+            grep -F "Setup complete"
+          diff -u "$test_dir/expected.log" "$test_dir/local.log"
+          test ! -e "$test_dir/unexpected-curl.log"
       - name: Check Node installer flow
         run: |
           test_home=$(mktemp -d)
