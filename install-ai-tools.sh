@@ -68,6 +68,16 @@ npx --yes skills add https://github.com/samber/cc-skills-golang --global \
 	--skill golang-concurrency golang-context golang-security \
 	golang-troubleshooting --yes
 
+shell_guidance='- For shell-script work, use `shellcheck <files> && shfmt -d <files>` for validation; target relevant files instead of reading every script just to check it.'
+json_guidance='- For JSON, especially `gh api` output, use `jq` or `gh --jq` to extract only the fields needed instead of loading raw JSON.'
+for file in "$HOME/.codex/AGENTS.md" "$HOME/.claude/CLAUDE.md"; do
+	mkdir -p "${file%/*}"
+	touch "$file"
+	for guidance in "$shell_guidance" "$json_guidance"; do
+		grep -Fqx -- "$guidance" "$file" || printf '%s\n' "$guidance" >>"$file"
+	done
+done
+
 printf '\nAI shell tools available to Codex and Claude Code:\n'
 shellcheck --version | sed -n 's/^version: /  shellcheck /p'
 printf '  shfmt %s\n' "$(shfmt --version)"
