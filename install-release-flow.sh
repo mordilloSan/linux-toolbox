@@ -29,7 +29,8 @@ trap 'rm -rf "$test_dir"' EXIT
 MAKEFILES="$make_config" make --directory="$test_dir" --no-print-directory --dry-run merge-release |
 	grep -Fqx 'gh release-flow "merge-release"'
 
-makefiles_profile="export MAKEFILES=\"\$HOME/.config/make/release-flow.mk\""
+# shellcheck disable=SC2016
+makefiles_profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
 if [[ -s $HOME/.profile ]] && ! tail -c 1 "$HOME/.profile" | grep -q '^$'; then
 	printf '\n' >>"$HOME/.profile"
 fi

@@ -23,7 +23,7 @@ jobs:
         env:
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
           printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
           LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
           export PATH="$RUNNER_TEMP:$PATH"
@@ -43,4 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-        run: gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" --generate-notes
+        run: |
+          release_args=()
+          [[ "$RELEASE_TAG" == *-* ]] && release_args+=(--prerelease)
+          gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" --generate-notes "${release_args[@]}"
