@@ -10,6 +10,7 @@ fi
 
 export NVM_DIR=/usr/local/nvm
 if [[ ! -s $NVM_DIR/nvm.sh ]]; then
+	install -d -m 755 "$NVM_DIR"
 	nvm_version=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://latest.nvm.sh)
 	nvm_version=${nvm_version##*/}
 	[[ $nvm_version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -17,13 +18,13 @@ if [[ ! -s $NVM_DIR/nvm.sh ]]; then
 		exit 1
 	}
 	curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
-		PROFILE=/dev/null bash
+		PROFILE=/dev/null bash >/dev/null
 fi
 
 # shellcheck source=/dev/null
 . "$NVM_DIR/nvm.sh"
-nvm install --lts
-nvm alias default 'lts/*'
+nvm install --lts --no-progress >/dev/null
+nvm alias default 'lts/*' >/dev/null
 
 current=$(nvm current)
 ln -sfn "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
@@ -35,6 +36,3 @@ chmod 644 /etc/profile.d/node.sh
 for command in node npm npx corepack; do
 	ln -sfn "$NVM_DIR/versions/node/current/bin/$command" "/usr/local/bin/$command"
 done
-
-"$NVM_DIR/versions/node/current/bin/node" --version
-"$NVM_DIR/versions/node/current/bin/npm" --version

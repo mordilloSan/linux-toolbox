@@ -49,3 +49,12 @@ jobs:
           printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
             install-shell-tools.sh install-release-flow.sh install-ai-tools.sh > "$test_dir/expected.log"
           diff -u "$test_dir/expected.log" "$test_dir/curl.log"
+      - name: Check per-package output
+        run: |
+          source install-dependencies.sh
+          PKG_MGR=apt
+          apt-get() { printf '%s\n' "${!#}" >> "$RUNNER_TEMP/packages.log"; }
+          output=$(pkg_install git gh)
+          grep -Fq 'Installing or updating git...' <<< "$output"
+          grep -Fq 'gh installed' <<< "$output"
+          diff -u <(printf '%s\n' git gh) "$RUNNER_TEMP/packages.log"

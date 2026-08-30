@@ -16,7 +16,6 @@ readonly GREY='\e[90m'
 readonly RED='\e[91m'
 readonly YELLOW='\e[33m'
 
-readonly LINE=" ${GREEN}───────────────────────────────────────────────────────${COLOUR_RESET}"
 Show() {
 	local status="$1"
 	shift
@@ -29,14 +28,6 @@ Show() {
 	2) echo -e " ${GREY}[${BOLD} INFO ${GREY}]${COLOUR_RESET} $*" ;;
 	3) echo -e " ${GREY}[${YELLOW}NOTICE${GREY}]${COLOUR_RESET} $*" ;;
 	esac
-}
-
-Header() {
-	echo ""
-	echo -e "${LINE}"
-	echo -e " ${BOLD} $*${COLOUR_RESET}"
-	echo -e "${LINE}"
-	echo ""
 }
 
 # ---------- Distro Detection ----------
@@ -85,17 +76,20 @@ pkg_installed() {
 }
 
 pkg_install() {
-	if [[ "$PKG_MGR" == apt ]]; then
-		apt-get install -y -qq "$@"
-	else
-		"$PKG_MGR" install -y -q "$@"
-	fi
+	local package
+	for package; do
+		Show 2 "Installing or updating ${package}..."
+		if [[ "$PKG_MGR" == apt ]]; then
+			apt-get install -y -qq "$package" >/dev/null || Show 1 "Failed to install ${package}"
+		else
+			"$PKG_MGR" install -y -q "$package" >/dev/null || Show 1 "Failed to install ${package}"
+		fi
+		Show 0 "${package} installed"
+	done
 }
 
 # ---------- Packages ----------
 install_packages() {
-	Header "Installing Packages"
-
 	if [[ -z "$PKG_MGR" ]]; then
 		Show 1 "Unsupported distribution: ${DISTRO}"
 	fi
@@ -107,12 +101,14 @@ install_packages() {
 	if ! command -v curl >/dev/null 2>&1; then
 		bootstrap+=(curl)
 	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		bootstrap+=(jq)
+	fi
 	if ((${#bootstrap[@]})); then
 		if [[ "$PKG_MGR" == apt ]]; then
 			Show 2 "Updating package lists..."
 			apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
 		fi
-		Show 2 "Installing HTTPS prerequisites..."
 		pkg_install "${bootstrap[@]}"
 	fi
 
@@ -132,9 +128,7 @@ install_packages() {
 	fi
 	Show 0 "GitHub CLI repository configured"
 
-	Show 2 "Installing or updating ${#packages[@]} packages..."
 	pkg_install "${packages[@]}"
-	Show 0 "Packages installed"
 }
 
 # ---------- Main ----------
@@ -148,18 +142,10 @@ main() {
 
 	require_root
 
-	Header "${GREY} Linux Tools Installer${COLOUR_RESET}"
-
 	detect_distro
 	Show 2 "Detected distribution: ${BOLD}${DISTRO}${COLOUR_RESET}"
 
 	install_packages
-
-	echo ""
-	echo -e "${LINE}"
-	echo -e " ${GREEN}${BOLD}Installation complete!${COLOUR_RESET}"
-	echo -e "${LINE}"
-	echo ""
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
