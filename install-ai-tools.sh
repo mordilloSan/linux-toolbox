@@ -7,7 +7,7 @@ if [[ $EUID -eq 0 ]]; then
 	exit 1
 fi
 
-for command in curl go jq npx; do
+for command in curl gh go jq npx; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
 		exit 1
@@ -65,6 +65,7 @@ install -m 755 "$tmp_dir/shellcheck-$shellcheck_version/shellcheck" "$HOME/.loca
 install -m 755 "$tmp_dir/ripgrep-$ripgrep_version-$ripgrep_arch-unknown-linux-musl/rg" "$HOME/.local/bin/rg"
 GOBIN="$HOME/.local/bin" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
 GOBIN="$HOME/.local/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+gh extension install mordilloSan/gh-release-flow --force
 
 claude plugin marketplace add DietrichGebert/ponytail
 claude plugin install ponytail@ponytail --yes

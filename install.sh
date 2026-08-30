@@ -93,6 +93,7 @@ export PATH="$HOME/.local/bin:$PATH"
 for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
 	command -v "$command" >/dev/null || fail "$command was not found after installation."
 done
+gh release-flow --help >/dev/null || fail "gh-release-flow was not found after installation."
 ok "All installed commands are available"
 
 if confirm "Set up your Git identity and GitHub authentication now?"; then
