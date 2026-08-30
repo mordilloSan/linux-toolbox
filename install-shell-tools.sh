@@ -7,7 +7,7 @@ if [[ $EUID -eq 0 ]]; then
 	exit 1
 fi
 
-for command in curl gzip install jq sha256sum tar; do
+for command in awk curl gzip install sha256sum tar; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
 		exit 1
@@ -32,11 +32,23 @@ esac
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 install_dir=${LINUX_TOOLBOX_BIN_DIR:-$HOME/.local/bin}
+jq_asset="jq-linux-$go_arch"
+jq_checksum=$(curl -fsSL https://github.com/jqlang/jq/releases/latest/download/sha256sum.txt |
+	awk -v asset="$jq_asset" '$2 == asset { print $1 }')
+[[ $jq_checksum =~ ^[0-9a-f]{64}$ ]] || {
+	echo "Could not verify the latest jq release." >&2
+	exit 1
+}
+curl -fsSL "https://github.com/jqlang/jq/releases/latest/download/$jq_asset" -o "$tmp_dir/jq"
+printf '%s  %s\n' "$jq_checksum" "$tmp_dir/jq" | sha256sum --check --quiet
+chmod 755 "$tmp_dir/jq"
 
 download() {
 	local repo=$1 pattern=$2 output=$3 asset url digest
+	# jq expands $pattern, not the shell.
+	# shellcheck disable=SC2016
 	asset=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" |
-		jq -er --arg pattern "$pattern" \
+		"$tmp_dir/jq" -er --arg pattern "$pattern" \
 			'[.assets[] | select(.name | test($pattern))] |
 			if length == 1 then .[0] | [.browser_download_url, .digest] | @tsv
 			else error("expected one matching release asset") end') || {
@@ -67,8 +79,6 @@ download mvdan/sh "_linux_${go_arch}$" "$tmp_dir/shfmt"
 actionlint_archive="$tmp_dir/actionlint.tar.gz"
 download rhysd/actionlint "_linux_${go_arch}\\.tar\\.gz$" "$actionlint_archive"
 tar -xzf "$actionlint_archive" -C "$tmp_dir/actionlint"
-
-download jqlang/jq "^jq-linux-${go_arch}$" "$tmp_dir/jq"
 
 install -Dm755 "$tmp_dir/shellcheck/shellcheck" "$install_dir/shellcheck"
 install -Dm755 "$tmp_dir/ripgrep/rg" "$install_dir/rg"

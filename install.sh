@@ -81,7 +81,8 @@ step "2/6 Go"
 ok "Go installed"
 
 step "3/6 Node.js"
-"${fetch[@]}" "$base_url/install-node.sh" | sudo bash
+"${fetch[@]}" "$base_url/install-node.sh" | bash
+export PATH="$HOME/.nvm/versions/node/current/bin:$HOME/.local/bin:$PATH"
 ok "Node.js $(node --version) and npm $(npm --version) installed"
 
 step "4/6 Shell tools"
@@ -97,7 +98,6 @@ step "6/6 AI tools and skills"
 ok "AI tools and skills installed"
 
 step "Verifying installation"
-export PATH="$HOME/.local/bin:$PATH"
 for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
 	command -v "$command" >/dev/null || fail "$command was not found after installation."
 done

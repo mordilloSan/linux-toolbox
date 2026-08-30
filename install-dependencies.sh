@@ -95,14 +95,15 @@ install_packages() {
 	fi
 
 	local packages=(git gh make tar gzip)
+	[[ "$PKG_MGR" == apt ]] && packages+=(xz-utils) || packages+=(xz)
+	if ! command -v awk >/dev/null 2>&1; then
+		[[ "$PKG_MGR" == apt ]] && packages+=(mawk) || packages+=(gawk)
+	fi
 
 	local bootstrap=()
 	pkg_installed ca-certificates || bootstrap+=(ca-certificates)
 	if ! command -v curl >/dev/null 2>&1; then
 		bootstrap+=(curl)
-	fi
-	if ! command -v jq >/dev/null 2>&1; then
-		bootstrap+=(jq)
 	fi
 	if ((${#bootstrap[@]})); then
 		if [[ "$PKG_MGR" == apt ]]; then

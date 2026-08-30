@@ -49,6 +49,24 @@ jobs:
           printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
             install-shell-tools.sh install-release-flow.sh install-ai-tools.sh > "$test_dir/expected.log"
           diff -u "$test_dir/expected.log" "$test_dir/curl.log"
+      - name: Check Node installer flow
+        run: |
+          test_home=$(mktemp -d)
+          trap 'rm -rf "$test_home"' EXIT
+          mkdir -p "$test_home/.nvm"
+          cat > "$test_home/.nvm/nvm.sh" <<'EOF'
+          nvm() {
+            case $1 in
+              install) echo "internal install output" ;;
+              alias) ;;
+              version) echo "v24.20.0" ;;
+            esac
+          }
+          EOF
+          output=$(HOME="$test_home" NVM_DIR="$test_home/.nvm" bash install-node.sh 2>&1)
+          test -z "$output"
+          test "$(readlink "$test_home/.nvm/versions/node/current")" = \
+            "$test_home/.nvm/versions/node/v24.20.0"
       - name: Check per-package output
         run: |
           source install-dependencies.sh
