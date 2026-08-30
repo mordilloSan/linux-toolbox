@@ -25,12 +25,12 @@ jobs:
         run: |
           [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
+          LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
+          export PATH="$RUNNER_TEMP:$PATH"
           bash -n -- *.sh
           shellcheck -- *.sh
-          GOBIN="$RUNNER_TEMP" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
-          "$RUNNER_TEMP/shfmt" -d -- *.sh
-          GOBIN="$RUNNER_TEMP" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          "$RUNNER_TEMP/actionlint"
+          shfmt -d -- *.sh
+          actionlint
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}

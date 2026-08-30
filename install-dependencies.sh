@@ -100,8 +100,7 @@ install_packages() {
 		Show 1 "Unsupported distribution: ${DISTRO}"
 	fi
 
-	local packages=(git gh jq make tar gzip)
-	[[ "$PKG_MGR" == apt ]] && packages+=(xz-utils) || packages+=(xz)
+	local packages=(git gh make tar gzip)
 
 	local bootstrap=()
 	pkg_installed ca-certificates || bootstrap+=(ca-certificates)

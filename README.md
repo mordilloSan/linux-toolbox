@@ -25,9 +25,12 @@ From an existing checkout, run:
 ```
 
 The installer prompts for `sudo` and installs system packages, Go, Node.js,
-Codex, Claude Code, shared skills, and AI-friendly shell tools: ShellCheck,
-`shfmt`, `jq`, ripgrep, actionlint, and the `gh-release-flow` extension. When run
+Codex, Claude Code, shared skills, AI-friendly shell tools (ShellCheck, `shfmt`,
+`jq`, ripgrep, and actionlint), and the `gh-release-flow` extension. When run
 interactively, it also offers Git and GitHub setup and optional Ubuntu cleanup.
+
+Set `LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1` when running the installer to leave
+existing global Codex and Claude instruction files unchanged.
 
 ## Ubuntu cleanup
 
@@ -65,15 +68,20 @@ handled by GitHub Actions.
 
 ## Releases
 
-Every pull request and push to `main` checks the shell scripts. Releases use
+Every pull request and push to `main` checks Bash syntax, ShellCheck findings,
+shfmt formatting, and GitHub Actions workflows with actionlint. Releases use
 `dev/v*` branches and the installed GitHub CLI extension:
 
 ```bash
-gh release-flow start-dev v1.2.0
+make start-dev VERSION=v1.2.0
 # Commit your changes, then:
-gh release-flow open-pr
-gh release-flow merge
+make open-pr
+make merge-release
 ```
+
+The complete installer makes these targets available without repository
+Makefiles. To install only the release flow, run `./install-release-flow.sh`,
+then open a new login shell.
 
 The merge command waits for checks, merges the PR, monitors the release, and
 cleans up the release branch. The workflow tags the merge commit, publishes all
