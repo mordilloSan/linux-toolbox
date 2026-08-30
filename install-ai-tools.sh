@@ -7,7 +7,7 @@ if [[ $EUID -eq 0 ]]; then
 	exit 1
 fi
 
-for command in curl gh go jq npx; do
+for command in awk curl gh go npx sha256sum tar xz; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
 		exit 1
@@ -36,12 +36,14 @@ x86_64 | amd64)
 	shellcheck_sha256=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
 	ripgrep_arch=x86_64
 	ripgrep_sha256=33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c
+	jq_arch=amd64
 	;;
 aarch64 | arm64)
 	shellcheck_arch=aarch64
 	shellcheck_sha256=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
 	ripgrep_arch=aarch64
 	ripgrep_sha256=800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915
+	jq_arch=arm64
 	;;
 *)
 	echo "Unsupported architecture: $(uname -m)" >&2
@@ -52,6 +54,13 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 shellcheck_archive="$tmp_dir/shellcheck.tar.xz"
 ripgrep_archive="$tmp_dir/ripgrep.tar.gz"
+jq_asset="jq-linux-$jq_arch"
+jq_sha256=$(curl -fsSL https://github.com/jqlang/jq/releases/latest/download/sha256sum.txt |
+	awk -v asset="$jq_asset" '$2 == asset { print $1 }')
+[[ $jq_sha256 =~ ^[0-9a-f]{64}$ ]] || {
+	echo "Could not verify the latest jq release." >&2
+	exit 1
+}
 curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/$shellcheck_version/shellcheck-$shellcheck_version.linux-$shellcheck_arch.tar.xz" \
 	-o "$shellcheck_archive"
 printf '%s  %s\n' "$shellcheck_sha256" "$shellcheck_archive" | sha256sum --check
@@ -60,9 +69,12 @@ curl -fsSL "https://github.com/BurntSushi/ripgrep/releases/download/$ripgrep_ver
 	-o "$ripgrep_archive"
 printf '%s  %s\n' "$ripgrep_sha256" "$ripgrep_archive" | sha256sum --check
 tar -xzf "$ripgrep_archive" -C "$tmp_dir"
+curl -fsSL "https://github.com/jqlang/jq/releases/latest/download/$jq_asset" -o "$tmp_dir/jq"
+printf '%s  %s\n' "$jq_sha256" "$tmp_dir/jq" | sha256sum --check
 install -d "$HOME/.local/bin"
 install -m 755 "$tmp_dir/shellcheck-$shellcheck_version/shellcheck" "$HOME/.local/bin/shellcheck"
 install -m 755 "$tmp_dir/ripgrep-$ripgrep_version-$ripgrep_arch-unknown-linux-musl/rg" "$HOME/.local/bin/rg"
+install -m 755 "$tmp_dir/jq" "$HOME/.local/bin/jq"
 GOBIN="$HOME/.local/bin" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
 GOBIN="$HOME/.local/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 gh extension install mordilloSan/gh-release-flow --force

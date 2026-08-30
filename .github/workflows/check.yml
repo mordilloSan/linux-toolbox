@@ -41,3 +41,21 @@ jobs:
           PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \
             LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh |
             grep -F "Setup complete"
+      - name: Check Node installer flow
+        run: |
+          test_home=$(mktemp -d)
+          trap 'rm -rf "$test_home"' EXIT
+          mkdir -p "$test_home/.nvm"
+          cat > "$test_home/.nvm/nvm.sh" <<'EOF'
+          nvm() {
+            case $1 in
+              install) echo "internal install output" ;;
+              alias) ;;
+              version) echo "v24.20.0" ;;
+            esac
+          }
+          EOF
+          output=$(HOME="$test_home" NVM_DIR="$test_home/.nvm" bash install-node.sh 2>&1)
+          test -z "$output"
+          test "$(readlink "$test_home/.nvm/versions/node/current")" = \
+            "$test_home/.nvm/versions/node/v24.20.0"

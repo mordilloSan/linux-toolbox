@@ -1,14 +1,20 @@
 #!/bin/bash
-# Install the latest Node.js LTS system-wide using LinuxIO's nvm flow.
-# Usage: sudo bash install-node.sh
+# Install the latest Node.js LTS using LinuxIO's user-local nvm flow.
 set -euo pipefail
 
-if [[ $EUID -ne 0 ]]; then
-	echo "Run as root: sudo bash $0" >&2
+if [[ $EUID -eq 0 ]]; then
+	echo "Run as your regular user, not with sudo." >&2
 	exit 1
 fi
 
-export NVM_DIR=/usr/local/nvm
+for command in awk curl grep sed tar; do
+	command -v "$command" >/dev/null || {
+		echo "$command is required. Run the complete installer first." >&2
+		exit 1
+	}
+done
+
+export NVM_DIR=${NVM_DIR:-$HOME/.nvm}
 if [[ ! -s $NVM_DIR/nvm.sh ]]; then
 	nvm_version=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://latest.nvm.sh)
 	nvm_version=${nvm_version##*/}
@@ -17,24 +23,26 @@ if [[ ! -s $NVM_DIR/nvm.sh ]]; then
 		exit 1
 	}
 	curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
-		PROFILE=/dev/null bash
+		METHOD=script bash >/dev/null
 fi
 
-# shellcheck source=/dev/null
-. "$NVM_DIR/nvm.sh"
-nvm install --lts
-nvm alias default 'lts/*'
+install_node() (
+	# nvm is not compatible with errexit.
+	set +e
+	set -uo pipefail
+	# shellcheck source=/dev/null
+	. "$NVM_DIR/nvm.sh" || return
+	local log current
+	log=$(mktemp)
+	trap 'rm -f "$log"' EXIT
+	if ! nvm install --lts --no-progress >"$log" 2>&1; then
+		cat "$log" >&2
+		return 1
+	fi
+	nvm alias default 'lts/*' >/dev/null || return
+	current=$(nvm version 'lts/*') || return
+	mkdir -p "$NVM_DIR/versions/node" || return
+	ln -snf "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
+)
 
-current=$(nvm current)
-ln -sfn "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
-# PATH intentionally expands in future login shells.
-# shellcheck disable=SC2016
-printf '%s\n' 'export PATH="/usr/local/nvm/versions/node/current/bin:$PATH"' \
-	>/etc/profile.d/node.sh
-chmod 644 /etc/profile.d/node.sh
-for command in node npm npx corepack; do
-	ln -sfn "$NVM_DIR/versions/node/current/bin/$command" "/usr/local/bin/$command"
-done
-
-"$NVM_DIR/versions/node/current/bin/node" --version
-"$NVM_DIR/versions/node/current/bin/npm" --version
+install_node
