@@ -20,6 +20,8 @@ jobs:
           shellcheck -- *.sh
           GOBIN="$RUNNER_TEMP" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           "$RUNNER_TEMP/shfmt" -d -- *.sh
+          GOBIN="$RUNNER_TEMP" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$RUNNER_TEMP/actionlint"
       - name: Check complete installer flow
         run: |
           test_dir=$(mktemp -d)
@@ -33,7 +35,7 @@ jobs:
           esac
           EOF
           chmod +x "$test_dir/bin/mock"
-          for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt; do
+          for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
             ln -s mock "$test_dir/bin/$command"
           done
           PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \

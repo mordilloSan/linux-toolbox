@@ -20,6 +20,8 @@ jobs:
           shellcheck -- *.sh
           GOBIN="$RUNNER_TEMP" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           "$RUNNER_TEMP/shfmt" -d -- *.sh
+          GOBIN="$RUNNER_TEMP" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$RUNNER_TEMP/actionlint"
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}

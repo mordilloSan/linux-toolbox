@@ -26,8 +26,8 @@ From an existing checkout, run:
 
 The installer prompts for `sudo` and installs system packages, Go, Node.js,
 Codex, Claude Code, shared skills, and AI-friendly shell tools: ShellCheck,
-`shfmt`, and `jq`. When run interactively, it also offers Git and GitHub setup
-and optional Ubuntu cleanup.
+`shfmt`, `jq`, ripgrep, and actionlint. When run interactively, it also offers
+Git and GitHub setup and optional Ubuntu cleanup.
 
 ## Ubuntu cleanup
 

@@ -90,7 +90,7 @@ ok "AI tools and skills installed"
 
 step "Verifying installation"
 export PATH="$HOME/.local/bin:$PATH"
-for command in git gh jq make go node npm npx codex claude shellcheck shfmt; do
+for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
 	command -v "$command" >/dev/null || fail "$command was not found after installation."
 done
 ok "All installed commands are available"
