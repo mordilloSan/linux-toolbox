@@ -65,13 +65,16 @@ handled by GitHub Actions.
 
 ## Releases
 
-Every push and pull request to `main` checks the shell scripts with Bash and
-ShellCheck. To publish pinned installer files, push a semantic version tag:
+Every pull request and push to `main` checks the shell scripts. Releases use
+`dev/v*` branches and the installed GitHub CLI extension:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+gh release-flow start-dev v1.2.0
+# Commit your changes, then:
+gh release-flow open-pr
+gh release-flow merge
 ```
 
-The release workflow publishes all scripts as GitHub release assets and makes
-that release's `install.sh` download the matching versions of its child scripts.
+The merge command waits for checks, merges the PR, monitors the release, and
+cleans up the release branch. The workflow tags the merge commit, publishes all
+scripts as release assets, and pins that release's child-script downloads.
