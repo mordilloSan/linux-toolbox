@@ -14,74 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check syntax and style
+      - name: Install check tools
         run: |
           LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
-          export PATH="$RUNNER_TEMP:$PATH"
-          make check
-      - name: Check installer orchestration
-        run: |
-          test_dir=$(mktemp -d)
-          trap 'rm -rf "$test_dir"' EXIT
-          mkdir -p "$test_dir/bin" "$test_dir/home"
-          cat > "$test_dir/bin/mock" <<'EOF'
-          #!/usr/bin/env bash
-          case ${0##*/} in
-            curl)
-              url=${!#}
-              printf '%s\n' "${url##*/}" >> "$MOCK_CURL_LOG"
-              printf '%s\n' '#!/usr/bin/env bash' 'exit 0'
-              ;;
-            sudo) [[ ${1:-} == -v ]] || exec "$@" ;;
-          esac
-          EOF
-          chmod +x "$test_dir/bin/mock"
-          # Keep this mock list in sync with install.sh's verification loop.
-          for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap; do
-            ln -s mock "$test_dir/bin/$command"
-          done
-          MOCK_CURL_LOG="$test_dir/curl.log" PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \
-            LINUX_TOOLBOX_NONINTERACTIVE=1 bash < install.sh |
-            grep -F "Setup complete"
-          printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
-            install-shell-tools.sh install-release-flow.sh install-ai-tools.sh > "$test_dir/expected.log"
-          diff -u "$test_dir/expected.log" "$test_dir/curl.log"
-          mkdir "$test_dir/local"
-          cp install.sh "$test_dir/local/"
-          while read -r script; do
-            printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q >> %q\n' \
-              "$script" "$test_dir/local.log" > "$test_dir/local/$script"
-          done < "$test_dir/expected.log"
-          MOCK_CURL_LOG="$test_dir/unexpected-curl.log" PATH="$test_dir/bin:$PATH" \
-            HOME="$test_dir/home" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$test_dir/local/install.sh" |
-            grep -F "Setup complete"
-          diff -u "$test_dir/expected.log" "$test_dir/local.log"
-          test ! -e "$test_dir/unexpected-curl.log"
-      - name: Check Node installer flow
-        run: |
-          test_home=$(mktemp -d)
-          trap 'rm -rf "$test_home"' EXIT
-          mkdir -p "$test_home/.nvm"
-          cat > "$test_home/.nvm/nvm.sh" <<'EOF'
-          nvm() {
-            case $1 in
-              install) echo "internal install output" ;;
-              alias) ;;
-              version) echo "v24.20.0" ;;
-            esac
-          }
-          EOF
-          output=$(HOME="$test_home" NVM_DIR="$test_home/.nvm" bash install-node.sh 2>&1)
-          test -z "$output"
-          test "$(readlink "$test_home/.nvm/versions/node/current")" = \
-            "$test_home/.nvm/versions/node/v24.20.0"
-      - name: Check per-package output
-        run: |
-          source install-dependencies.sh
-          PKG_MGR=apt
-          apt-get() { printf '%s\n' "${!#}" >> "$RUNNER_TEMP/packages.log"; echo 'raw package output'; }
-          output=$(pkg_install git gh)
-          grep -Fq 'Installing or updating git...' <<< "$output"
-          grep -Fq 'gh installed' <<< "$output"
-          if grep -Fq 'raw package output' <<< "$output"; then exit 1; fi
-          diff -u <(printf '%s\n' git gh) "$RUNNER_TEMP/packages.log"
+          printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Check syntax and style
+        run: make check
+      - name: Test installer behavior
+        run: make test

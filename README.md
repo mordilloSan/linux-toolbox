@@ -107,7 +107,7 @@ make merge-release
 
 Run `source ~/.bashrc` or open a new terminal after first installing the targets. Release branches use the `dev/v*` naming convention.
 
-Every pull request and push to `main` checks Bash syntax, ShellCheck, shfmt, and GitHub Actions workflows. Merging a release PR creates the tag, publishes all scripts as release assets, and pins the entrypoint to that release.
+Run `make check` for syntax and style checks, and `make test` for the isolated installer behavior tests. Pull requests run both targets, and a release is published only when the PR's Check workflow passed. Merging a release PR then creates the tag, publishes all scripts as release assets, and pins the entrypoint to that release.
 
 ## Security and privacy
 
