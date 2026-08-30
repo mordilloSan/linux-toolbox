@@ -101,6 +101,9 @@ install_packages() {
 	if ! command -v curl >/dev/null 2>&1; then
 		bootstrap+=(curl)
 	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		bootstrap+=(jq)
+	fi
 	if ((${#bootstrap[@]})); then
 		if [[ "$PKG_MGR" == apt ]]; then
 			Show 2 "Updating package lists..."
