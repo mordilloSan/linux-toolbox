@@ -82,7 +82,7 @@ ok "Go installed"
 
 step "3/6 Node.js"
 "${fetch[@]}" "$base_url/install-node.sh" | sudo bash
-ok "Node.js installed"
+ok "Node.js $(node --version) and npm $(npm --version) installed"
 
 step "4/6 Shell tools"
 "${fetch[@]}" "$base_url/install-shell-tools.sh" | bash
