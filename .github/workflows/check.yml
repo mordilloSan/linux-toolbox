@@ -18,10 +18,7 @@ jobs:
         run: |
           LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
           export PATH="$RUNNER_TEMP:$PATH"
-          bash -n -- *.sh
-          shellcheck -- *.sh
-          shfmt -d -- *.sh
-          actionlint
+          make check
       - name: Check installer orchestration
         run: |
           test_dir=$(mktemp -d)
