@@ -6,9 +6,10 @@ if ((EUID == 0)); then
     exit 1
 fi
 
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+base_url=https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main
 
-sudo bash "$script_dir/install-dependencies.sh"
-sudo bash "$script_dir/install-go.sh"
-sudo bash "$script_dir/install-node.sh"
-bash "$script_dir/install-ai-tools.sh"
+# ponytail: main can move between downloads; use release URLs when atomic releases matter.
+curl -fsSL "$base_url/install-dependencies.sh" | sudo bash
+curl -fsSL "$base_url/install-go.sh" | sudo bash
+curl -fsSL "$base_url/install-node.sh" | sudo bash
+curl -fsSL "$base_url/install-ai-tools.sh" | bash
