@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          checks=$(gh pr checks "$PR_NUMBER" --json bucket,workflow)
+          checks=$(gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json bucket,workflow)
           jq -e '[.[] | select(.workflow == "Check")] |
             length > 0 and all(.[]; .bucket == "pass")' <<< "$checks"
       - uses: actions/checkout@v7
