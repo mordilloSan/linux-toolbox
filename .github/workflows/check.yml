@@ -1,0 +1,39 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check syntax and style
+        run: |
+          bash -n -- *.sh
+          shellcheck -- *.sh
+      - name: Check complete installer flow
+        run: |
+          test_dir=$(mktemp -d)
+          trap 'rm -rf "$test_dir"' EXIT
+          mkdir -p "$test_dir/bin" "$test_dir/home"
+          cat > "$test_dir/bin/mock" <<'EOF'
+          #!/usr/bin/env bash
+          case ${0##*/} in
+            curl) printf '%s\n' '#!/usr/bin/env bash' 'exit 0' ;;
+            sudo) [[ ${1:-} == -v ]] || exec "$@" ;;
+          esac
+          EOF
+          chmod +x "$test_dir/bin/mock"
+          for command in curl sudo git gh make go node npm npx codex claude; do
+            ln -s mock "$test_dir/bin/$command"
+          done
+          PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \
+            LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh |
+            grep -F "Setup complete"

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate tag and scripts
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          bash -n -- *.sh
+          shellcheck -- *.sh
+      - name: Prepare pinned installer
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          cp -- *.sh dist/
+          sed -i "s#^base_url=.*#base_url=https://github.com/${REPOSITORY}/releases/download/${TAG}#" dist/install.sh
+          grep -Fx "base_url=https://github.com/${REPOSITORY}/releases/download/${TAG}" dist/install.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.sh --verify-tag --generate-notes

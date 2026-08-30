@@ -1,5 +1,7 @@
 # Linux toolbox
 
+[![Check](https://github.com/mordilloSan/linux-toolbox/actions/workflows/check.yml/badge.svg)](https://github.com/mordilloSan/linux-toolbox/actions/workflows/check.yml)
+
 Small, standalone Linux host utilities.
 
 ## Install
@@ -8,6 +10,12 @@ On a fresh system, run the complete installer as your regular user:
 
 ```bash
 curl -fsSL https://setup.engmariz.com | bash
+```
+
+If `curl` is unavailable but `wget` is installed:
+
+```bash
+wget -qO- https://setup.engmariz.com | bash
 ```
 
 From an existing checkout, run:
@@ -50,3 +58,19 @@ use GitHub CLI as Git's credential helper:
 
 Run it as your regular user. Existing name and email values are kept when you
 press Enter.
+
+This configures the current computer only. Repository checks and releases are
+handled by GitHub Actions.
+
+## Releases
+
+Every push and pull request to `main` checks the shell scripts with Bash and
+ShellCheck. To publish pinned installer files, push a semantic version tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The release workflow publishes all scripts as GitHub release assets and makes
+that release's `install.sh` download the matching versions of its child scripts.
