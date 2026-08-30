@@ -4,14 +4,20 @@ Small, standalone Linux host utilities.
 
 ## Install
 
-Run the complete installer as your regular user; it prompts for `sudo` when
-installing system packages, Go, and Node.js:
+On a fresh system, run the complete installer as your regular user:
+
+```bash
+curl -fsSL https://setup.engmariz.com | bash
+```
+
+From an existing checkout, run:
 
 ```bash
 ./install.sh
 ```
 
-This also installs Codex, Claude Code, and their shared skills.
+The installer prompts for `sudo` and installs system packages, Go, Node.js,
+Codex, Claude Code, and their shared skills.
 
 ## Ubuntu cleanup
 
