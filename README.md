@@ -17,7 +17,8 @@ From an existing checkout, run:
 ```
 
 The installer prompts for `sudo` and installs system packages, Go, Node.js,
-Codex, Claude Code, and their shared skills.
+Codex, Claude Code, and their shared skills. When run interactively, it also
+offers Git and GitHub setup and optional Ubuntu cleanup.
 
 ## Ubuntu cleanup
 
