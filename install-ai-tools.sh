@@ -9,6 +9,22 @@ fi
 
 # Include tools installed by the preceding user-level installer step.
 export PATH="$HOME/.local/bin:$PATH"
+if ! command -v bwrap >/dev/null; then
+	command -v sudo >/dev/null || {
+		echo "sudo is required to install bubblewrap." >&2
+		exit 1
+	}
+	if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
+		sudo apt-get install -y -qq bubblewrap
+	elif command -v dnf >/dev/null && command -v rpm >/dev/null; then
+		sudo dnf install -y -q bubblewrap
+	elif command -v yum >/dev/null && command -v rpm >/dev/null; then
+		sudo yum install -y -q bubblewrap
+	else
+		echo "Install bubblewrap with your system package manager." >&2
+		exit 1
+	fi
+fi
 for command in actionlint curl jq npx rg shellcheck shfmt; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2

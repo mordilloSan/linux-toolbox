@@ -94,11 +94,17 @@ step "5/6 GitHub release flow"
 ok "GitHub release flow installed"
 
 step "6/6 AI tools and skills"
-"${fetch[@]}" "$base_url/install-ai-tools.sh" | bash
+if ! ai_tools_script=$("${fetch[@]}" "$base_url/install-ai-tools.sh"); then
+	fail "Unable to download the AI tools installer."
+fi
+if ! ai_tools_output=$(bash -c "$ai_tools_script" </dev/null 2>&1); then
+	printf '%s\n' "$ai_tools_output" >&2
+	fail "Unable to install AI tools and skills."
+fi
 ok "AI tools and skills installed"
 
 step "Verifying installation"
-for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
+for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap; do
 	command -v "$command" >/dev/null || fail "$command was not found after installation."
 done
 gh release-flow --help >/dev/null || fail "gh-release-flow was not found after installation."
@@ -124,7 +130,3 @@ if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 fi
 
 banner "Setup complete"
-
-if [[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]]; then
-	exec codex </dev/tty
-fi
