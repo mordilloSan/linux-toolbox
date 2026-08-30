@@ -97,8 +97,7 @@ step "6/6 AI tools and skills"
 if ! ai_tools_script=$("${fetch[@]}" "$base_url/install-ai-tools.sh"); then
 	fail "Unable to download the AI tools installer."
 fi
-if ! ai_tools_output=$(bash -c "$ai_tools_script" </dev/null 2>&1); then
-	printf '%s\n' "$ai_tools_output" >&2
+if ! bash -c "$ai_tools_script" </dev/null; then
 	fail "Unable to install AI tools and skills."
 fi
 ok "AI tools and skills installed"
@@ -110,13 +109,23 @@ done
 gh release-flow --help >/dev/null || fail "gh-release-flow was not found after installation."
 ok "All installed commands are available"
 
-if confirm "Set up your Git identity and GitHub authentication now?"; then
-	step "Git and GitHub setup"
-	git_setup=$("${fetch[@]}" "$base_url/setup-git.sh")
-	bash -c "$git_setup" </dev/tty
-	ok "Git and GitHub configured"
+git_setup=
+if confirm "Set up your Git identity now?"; then
+	step "Git identity"
+	git_setup=${git_setup:-$("${fetch[@]}" "$base_url/setup-git.sh")}
+	bash -c "$git_setup" -- identity </dev/tty
+	ok "Git identity configured"
 else
-	notice "Git and GitHub setup skipped"
+	notice "Git identity setup skipped"
+fi
+
+if confirm "Set up GitHub authentication now?"; then
+	step "GitHub authentication"
+	git_setup=${git_setup:-$("${fetch[@]}" "$base_url/setup-git.sh")}
+	bash -c "$git_setup" -- github </dev/tty
+	ok "GitHub authentication configured"
+else
+	notice "GitHub authentication setup skipped"
 fi
 
 if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then

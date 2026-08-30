@@ -34,9 +34,10 @@ MAKEFILES="$make_config" make --directory="$test_dir" --no-print-directory --dry
 
 # shellcheck disable=SC2016
 makefiles_profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
-if [[ -s $HOME/.bashrc ]] && ! tail -c 1 "$HOME/.bashrc" | grep -q '^$'; then
-	printf '\n' >>"$HOME/.bashrc"
+if ! grep -Fqxs -- "$makefiles_profile" "$HOME/.bashrc"; then
+	if [[ -s $HOME/.bashrc ]] && ! tail -c 1 "$HOME/.bashrc" | grep -q '^$'; then
+		printf '\n' >>"$HOME/.bashrc"
+	fi
+	printf '%s\n' "$makefiles_profile" >>"$HOME/.bashrc"
+	printf ' [NOTICE] Run source ~/.bashrc or open a new terminal before using the Make targets.\n'
 fi
-grep -Fqxs -- "$makefiles_profile" "$HOME/.bashrc" || printf '%s\n' "$makefiles_profile" >>"$HOME/.bashrc"
-
-printf 'Run source ~/.bashrc or open a new terminal before using the Make targets.\n'

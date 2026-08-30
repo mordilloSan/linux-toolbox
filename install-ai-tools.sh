@@ -7,24 +7,56 @@ if [[ $EUID -eq 0 ]]; then
 	exit 1
 fi
 
+readonly RESET=$'\033[0m'
+readonly GREEN=$'\033[38;5;154m'
+readonly GREY=$'\033[90m'
+readonly BOLD=$'\033[1m'
+
+info() {
+	printf ' %s[%s INFO %s]%s %s\n' "$GREY" "$BOLD" "$GREY" "$RESET" "$1"
+}
+
+ok() {
+	printf ' %s[%s  OK  %s]%s %s\n' "$GREY" "$GREEN" "$GREY" "$RESET" "$1"
+}
+
+run_quiet() {
+	local output
+	if ! output=$("$@" </dev/null 2>&1); then
+		[[ -z $output ]] || printf '%s\n' "$output" >&2
+		return 1
+	fi
+}
+
+run_installer() {
+	local url=$1 output
+	shift
+	if ! output=$({ curl -fsSL "$url" | "$@"; } 2>&1); then
+		[[ -z $output ]] || printf '%s\n' "$output" >&2
+		return 1
+	fi
+}
+
 # Include tools installed by the preceding user-level installer step.
 export PATH="$HOME/.local/bin:$PATH"
+info "Installing or updating bubblewrap..."
 if ! command -v bwrap >/dev/null; then
 	command -v sudo >/dev/null || {
 		echo "sudo is required to install bubblewrap." >&2
 		exit 1
 	}
 	if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
-		sudo apt-get install -y -qq bubblewrap
+		run_quiet sudo apt-get install -y -qq bubblewrap
 	elif command -v dnf >/dev/null && command -v rpm >/dev/null; then
-		sudo dnf install -y -q bubblewrap
+		run_quiet sudo dnf install -y -q bubblewrap
 	elif command -v yum >/dev/null && command -v rpm >/dev/null; then
-		sudo yum install -y -q bubblewrap
+		run_quiet sudo yum install -y -q bubblewrap
 	else
 		echo "Install bubblewrap with your system package manager." >&2
 		exit 1
 	fi
 fi
+ok "bubblewrap installed"
 for command in actionlint curl jq npx rg shellcheck shfmt; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
@@ -32,39 +64,57 @@ for command in actionlint curl jq npx rg shellcheck shfmt; do
 	}
 done
 
-printf ' [ INFO ] Installing Claude Code...\n'
-curl -fsSL https://claude.ai/install.sh | bash
+info "Installing or updating Claude Code..."
+run_installer https://claude.ai/install.sh bash
 command -v claude >/dev/null || {
 	echo "Claude Code installation failed." >&2
 	exit 1
 }
-printf ' [  OK  ] Claude Code installed\n'
+ok "Claude Code installed"
 
-printf ' [ INFO ] Installing Codex...\n'
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
+info "Installing or updating Codex..."
+run_installer https://chatgpt.com/codex/install.sh env CODEX_NON_INTERACTIVE=1 sh
 command -v codex >/dev/null || {
 	echo "Codex installation failed." >&2
 	exit 1
 }
-printf ' [  OK  ] Codex installed\n'
+ok "Codex installed"
 
-printf ' [ INFO ] Installing AI plugins and skills...\n'
-claude plugin marketplace add DietrichGebert/ponytail
-claude plugin install ponytail@ponytail --yes
-codex plugin marketplace add DietrichGebert/ponytail
-codex plugin add ponytail@ponytail
+info "Installing or updating Ponytail..."
+run_quiet claude plugin marketplace add DietrichGebert/ponytail
+run_quiet claude plugin install ponytail@ponytail --yes
+run_quiet codex plugin marketplace add DietrichGebert/ponytail
+run_quiet codex plugin add ponytail@ponytail
+ok "Ponytail installed"
 
-npx --yes skills add jakubkrehel/skills --global \
-	--agent codex claude-code --skill '*'
-npx --yes skills add vercel-labs/skills@find-skills --global \
-	--agent codex claude-code
-npx --yes skills add https://github.com/samber/cc-skills-golang --global \
+interface_skills=(
+	better-accessibility better-colors better-interface better-layout
+	better-typography better-ui better-writing break explain-interface
+	interface-review variant
+)
+info "Installing interface skills..."
+run_quiet npx --yes skills add jakubkrehel/skills --global \
+	--agent codex claude-code --skill "${interface_skills[@]}" --yes
+for skill in "${interface_skills[@]}"; do
+	ok "$skill installed"
+done
+
+info "Installing find-skills..."
+run_quiet npx --yes skills add vercel-labs/skills@find-skills --global \
+	--agent codex claude-code --yes
+ok "find-skills installed"
+
+go_skills=(golang-concurrency golang-context golang-security golang-troubleshooting)
+info "Installing Go skills..."
+run_quiet npx --yes skills add https://github.com/samber/cc-skills-golang --global \
 	--agent codex claude-code \
-	--skill golang-concurrency golang-context golang-security \
-	golang-troubleshooting
-printf ' [  OK  ] AI plugins and skills installed\n'
+	--skill "${go_skills[@]}" --yes
+for skill in "${go_skills[@]}"; do
+	ok "$skill installed"
+done
 
 if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
+	info "Configuring AI agent guidance..."
 	shell_guidance="- For shell-script work, use \`shellcheck <files> && shfmt -d <files>\` for validation; target relevant files instead of reading every script just to check it."
 	json_guidance="- For JSON, especially \`gh api\` output, use \`jq\` or \`gh --jq\` to extract only the fields needed instead of loading raw JSON."
 	search_guidance="- For codebase searches, use \`rg <pattern>\` and \`rg --files\` to narrow the relevant files instead of reading directories or whole files."
@@ -78,4 +128,5 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 			grep -Fqxs -- "$guidance" "$file" || printf '%s\n' "$guidance" >>"$file"
 		done
 	done
+	ok "AI agent guidance configured"
 fi
