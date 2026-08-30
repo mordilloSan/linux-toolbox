@@ -55,13 +55,13 @@ codex plugin marketplace add DietrichGebert/ponytail
 codex plugin add ponytail@ponytail
 
 npx --yes skills add jakubkrehel/skills --global \
-	--agent codex claude-code --skill '*' 
+	--agent codex claude-code --skill '*'
 npx --yes skills add vercel-labs/skills@find-skills --global \
-	--agent codex claude-code 
+	--agent codex claude-code
 npx --yes skills add https://github.com/samber/cc-skills-golang --global \
 	--agent codex claude-code \
 	--skill golang-concurrency golang-context golang-security \
-	golang-troubleshooting 
+	golang-troubleshooting
 printf ' [  OK  ] AI plugins and skills installed\n'
 
 if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then

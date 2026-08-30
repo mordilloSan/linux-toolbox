@@ -27,10 +27,7 @@ jobs:
           printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
           LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
           export PATH="$RUNNER_TEMP:$PATH"
-          bash -n -- *.sh
-          shellcheck -- *.sh
-          shfmt -d -- *.sh
-          actionlint
+          make check
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}
