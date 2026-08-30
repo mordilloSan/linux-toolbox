@@ -6,7 +6,9 @@ on:
     branches: [main]
 
 permissions:
+  checks: read
   contents: write
+  pull-requests: read
 
 jobs:
   release:
@@ -16,6 +18,14 @@ jobs:
       startsWith(github.event.pull_request.head.ref, 'dev/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Require successful Check workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          checks=$(gh pr checks "$PR_NUMBER" --json bucket,workflow)
+          jq -e '[.[] | select(.workflow == "Check")] |
+            length > 0 and all(.[]; .bucket == "pass")' <<< "$checks"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}

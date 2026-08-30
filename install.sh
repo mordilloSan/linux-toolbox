@@ -15,6 +15,19 @@ readonly BOLD=$'\033[1m'
 readonly LINE=' ───────────────────────────────────────────────────────'
 
 base_url=https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main
+script_dir=
+if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
+	script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+fi
+
+load_script() {
+	local name=$1
+	if [[ -n $script_dir && -f $script_dir/$name ]]; then
+		cat -- "$script_dir/$name"
+	else
+		"${fetch[@]}" "$base_url/$name"
+	fi
+}
 
 banner() {
 	printf '\n%s%s%s\n %s%s%s\n%s%s%s\n' \
@@ -73,32 +86,31 @@ sudo -v || fail "Unable to authenticate with sudo."
 ok "Linux $(uname -m) is supported"
 
 step "1/6 System dependencies"
-"${fetch[@]}" "$base_url/install-dependencies.sh" | sudo bash
+load_script install-dependencies.sh | sudo bash
 ok "System dependencies installed"
 
 step "2/6 Go"
-"${fetch[@]}" "$base_url/install-go.sh" | sudo bash
+load_script install-go.sh | sudo bash
 ok "$(go env GOVERSION) installed"
 
 step "3/6 Node.js"
-"${fetch[@]}" "$base_url/install-node.sh" | bash
+load_script install-node.sh | bash
 export PATH="$HOME/.nvm/versions/node/current/bin:$HOME/.local/bin:$PATH"
 ok "Node.js $(node --version) and npm $(npm --version) installed"
 
 step "4/6 Shell tools"
-"${fetch[@]}" "$base_url/install-shell-tools.sh" | bash
+load_script install-shell-tools.sh | bash
 ok "Shell tools installed"
 
 step "5/6 GitHub release flow"
-"${fetch[@]}" "$base_url/install-release-flow.sh" | bash
+load_script install-release-flow.sh | bash
 ok "GitHub release flow installed"
 
 step "6/6 AI tools and skills"
-if ! ai_tools_script=$("${fetch[@]}" "$base_url/install-ai-tools.sh"); then
+if ! ai_tools_script=$(load_script install-ai-tools.sh); then
 	fail "Unable to download the AI tools installer."
 fi
-if ! ai_tools_output=$(bash -c "$ai_tools_script" </dev/null 2>&1); then
-	printf '%s\n' "$ai_tools_output" >&2
+if ! bash -c "$ai_tools_script" </dev/null; then
 	fail "Unable to install AI tools and skills."
 fi
 ok "AI tools and skills installed"
@@ -110,19 +122,29 @@ done
 gh release-flow --help >/dev/null || fail "gh-release-flow was not found after installation."
 ok "All installed commands are available"
 
-if confirm "Set up your Git identity and GitHub authentication now?"; then
-	step "Git and GitHub setup"
-	git_setup=$("${fetch[@]}" "$base_url/setup-git.sh")
-	bash -c "$git_setup" </dev/tty
-	ok "Git and GitHub configured"
+git_setup=
+if confirm "Set up your Git identity now?"; then
+	step "Git identity"
+	git_setup=${git_setup:-$(load_script setup-git.sh)}
+	bash -c "$git_setup" -- identity </dev/tty
+	ok "Git identity configured"
 else
-	notice "Git and GitHub setup skipped"
+	notice "Git identity setup skipped"
+fi
+
+if confirm "Set up GitHub authentication now?"; then
+	step "GitHub authentication"
+	git_setup=${git_setup:-$(load_script setup-git.sh)}
+	bash -c "$git_setup" -- github </dev/tty
+	ok "GitHub authentication configured"
+else
+	notice "GitHub authentication setup skipped"
 fi
 
 if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 	if confirm "Remove all Snap apps, disable MOTD news, and block Snap from being reinstalled?"; then
 		step "Ubuntu cleanup"
-		"${fetch[@]}" "$base_url/ubuntu-cleanup.sh" | sudo bash
+		load_script ubuntu-cleanup.sh | sudo bash
 		ok "Ubuntu cleanup complete"
 	else
 		notice "Ubuntu cleanup skipped"
