@@ -40,7 +40,7 @@ jobs:
           EOF
           chmod +x "$test_dir/bin/mock"
           # Keep this mock list in sync with install.sh's verification loop.
-          for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
+          for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap; do
             ln -s mock "$test_dir/bin/$command"
           done
           MOCK_CURL_LOG="$test_dir/curl.log" PATH="$test_dir/bin:$PATH" HOME="$test_dir/home" \
