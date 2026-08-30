@@ -72,19 +72,27 @@ fi
 sudo -v || fail "Unable to authenticate with sudo."
 ok "Linux $(uname -m) is supported"
 
-step "1/4 System dependencies"
+step "1/6 System dependencies"
 "${fetch[@]}" "$base_url/install-dependencies.sh" | sudo bash
 ok "System dependencies installed"
 
-step "2/4 Go"
+step "2/6 Go"
 "${fetch[@]}" "$base_url/install-go.sh" | sudo bash
 ok "Go installed"
 
-step "3/4 Node.js"
+step "3/6 Node.js"
 "${fetch[@]}" "$base_url/install-node.sh" | sudo bash
 ok "Node.js installed"
 
-step "4/4 AI tools and skills"
+step "4/6 Shell tools"
+"${fetch[@]}" "$base_url/install-shell-tools.sh" | bash
+ok "Shell tools installed"
+
+step "5/6 GitHub release flow"
+"${fetch[@]}" "$base_url/install-release-flow.sh" | bash
+ok "GitHub release flow installed"
+
+step "6/6 AI tools and skills"
 "${fetch[@]}" "$base_url/install-ai-tools.sh" | bash
 ok "AI tools and skills installed"
 

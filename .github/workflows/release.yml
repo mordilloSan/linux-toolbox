@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -10,28 +11,39 @@ permissions:
 jobs:
   release:
     name: Publish scripts
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'dev/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
       - name: Validate tag and scripts
+        env:
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
+          printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
+          LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
+          export PATH="$RUNNER_TEMP:$PATH"
           bash -n -- *.sh
           shellcheck -- *.sh
-          GOBIN="$RUNNER_TEMP" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
-          "$RUNNER_TEMP/shfmt" -d -- *.sh
-          GOBIN="$RUNNER_TEMP" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          "$RUNNER_TEMP/actionlint"
+          shfmt -d -- *.sh
+          actionlint
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
         run: |
           mkdir dist
           cp -- *.sh dist/
-          sed -i "s#^base_url=.*#base_url=https://github.com/${REPOSITORY}/releases/download/${TAG}#" dist/install.sh
-          grep -Fx "base_url=https://github.com/${REPOSITORY}/releases/download/${TAG}" dist/install.sh
+          sed -i "s#^base_url=.*#base_url=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}#" dist/install.sh
+          grep -Fx "base_url=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}" dist/install.sh
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.sh --verify-tag --generate-notes
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          release_args=()
+          [[ "$RELEASE_TAG" == *-* ]] && release_args+=(--prerelease)
+          gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" --generate-notes "${release_args[@]}"
