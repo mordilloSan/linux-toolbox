@@ -2,8 +2,8 @@
 set -euo pipefail
 
 if ((EUID == 0)); then
-    echo "Run this installer as your regular user, not with sudo." >&2
-    exit 1
+	echo "Run this installer as your regular user, not with sudo." >&2
+	exit 1
 fi
 
 readonly RESET=$'\033[0m'
@@ -17,37 +17,40 @@ readonly LINE=' ─────────────────────�
 base_url=https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main
 
 banner() {
-    printf '\n%s%s%s\n %s%s%s\n%s%s%s\n' \
-        "$GREEN" "$LINE" "$RESET" "$BOLD" "$1" "$RESET" "$GREEN" "$LINE" "$RESET"
+	printf '\n%s%s%s\n %s%s%s\n%s%s%s\n' \
+		"$GREEN" "$LINE" "$RESET" "$BOLD" "$1" "$RESET" "$GREEN" "$LINE" "$RESET"
 }
 
 step() {
-    printf '\n %s[%s INFO %s]%s %s\n' "$GREY" "$BOLD" "$GREY" "$RESET" "$1"
+	printf '\n %s[%s INFO %s]%s %s\n' "$GREY" "$BOLD" "$GREY" "$RESET" "$1"
 }
 
 ok() {
-    printf ' %s[%s  OK  %s]%s %s\n' "$GREY" "$GREEN" "$GREY" "$RESET" "$1"
+	printf ' %s[%s  OK  %s]%s %s\n' "$GREY" "$GREEN" "$GREY" "$RESET" "$1"
 }
 
 notice() {
-    printf ' %s[%sNOTICE%s]%s %s\n' "$GREY" "$YELLOW" "$GREY" "$RESET" "$1"
+	printf ' %s[%sNOTICE%s]%s %s\n' "$GREY" "$YELLOW" "$GREY" "$RESET" "$1"
 }
 
 fail() {
-    printf ' %s[%sFAILED%s]%s %s\n' "$GREY" "$RED" "$GREY" "$RESET" "$1" >&2
-    exit 1
+	printf ' %s[%sFAILED%s]%s %s\n' "$GREY" "$RED" "$GREY" "$RESET" "$1" >&2
+	exit 1
 }
 
 confirm() {
-    local answer
-    [[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]] || return 1
-    if ! { exec 3<>/dev/tty; } 2>/dev/null; then
-        return 1
-    fi
-    printf '\n %s[?]%s %s [y/N] ' "$YELLOW" "$RESET" "$1" >&3
-    IFS= read -r answer <&3 || { exec 3>&-; return 1; }
-    exec 3>&-
-    [[ $answer == [yY] ]]
+	local answer
+	[[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]] || return 1
+	if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+		return 1
+	fi
+	printf '\n %s[?]%s %s [y/N] ' "$YELLOW" "$RESET" "$1" >&3
+	IFS= read -r answer <&3 || {
+		exec 3>&-
+		return 1
+	}
+	exec 3>&-
+	[[ $answer == [yY] ]]
 }
 
 banner "Linux Toolbox Installer"
@@ -55,16 +58,16 @@ banner "Linux Toolbox Installer"
 step "Preflight checks"
 [[ $(uname -s) == Linux ]] || fail "This installer supports Linux only."
 case $(uname -m) in
-    x86_64 | amd64 | aarch64 | arm64) ;;
-    *) fail "Unsupported architecture: $(uname -m)" ;;
+x86_64 | amd64 | aarch64 | arm64) ;;
+*) fail "Unsupported architecture: $(uname -m)" ;;
 esac
 command -v sudo >/dev/null || fail "sudo is required."
 if command -v curl >/dev/null; then
-    fetch=(curl -fsSL)
+	fetch=(curl -fsSL)
 elif command -v wget >/dev/null; then
-    fetch=(wget -qO-)
+	fetch=(wget -qO-)
 else
-    fail "curl or wget is required."
+	fail "curl or wget is required."
 fi
 sudo -v || fail "Unable to authenticate with sudo."
 ok "Linux $(uname -m) is supported"
@@ -87,28 +90,29 @@ ok "AI tools and skills installed"
 
 step "Verifying installation"
 export PATH="$HOME/.local/bin:$PATH"
-for command in git gh make go node npm npx codex claude; do
-    command -v "$command" >/dev/null || fail "$command was not found after installation."
+for command in git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint; do
+	command -v "$command" >/dev/null || fail "$command was not found after installation."
 done
+gh release-flow --help >/dev/null || fail "gh-release-flow was not found after installation."
 ok "All installed commands are available"
 
 if confirm "Set up your Git identity and GitHub authentication now?"; then
-    step "Git and GitHub setup"
-    git_setup=$("${fetch[@]}" "$base_url/setup-git.sh")
-    bash -c "$git_setup" </dev/tty
-    ok "Git and GitHub configured"
+	step "Git and GitHub setup"
+	git_setup=$("${fetch[@]}" "$base_url/setup-git.sh")
+	bash -c "$git_setup" </dev/tty
+	ok "Git and GitHub configured"
 else
-    notice "Git and GitHub setup skipped"
+	notice "Git and GitHub setup skipped"
 fi
 
 if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
-    if confirm "Remove all Snap apps, disable MOTD news, and block Snap from being reinstalled?"; then
-        step "Ubuntu cleanup"
-        "${fetch[@]}" "$base_url/ubuntu-cleanup.sh" | sudo bash
-        ok "Ubuntu cleanup complete"
-    else
-        notice "Ubuntu cleanup skipped"
-    fi
+	if confirm "Remove all Snap apps, disable MOTD news, and block Snap from being reinstalled?"; then
+		step "Ubuntu cleanup"
+		"${fetch[@]}" "$base_url/ubuntu-cleanup.sh" | sudo bash
+		ok "Ubuntu cleanup complete"
+	else
+		notice "Ubuntu cleanup skipped"
+	fi
 fi
 
 banner "Setup complete"
