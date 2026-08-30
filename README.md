@@ -18,12 +18,6 @@ If `curl` is unavailable but `wget` is installed:
 wget -qO- https://setup.engmariz.com | bash
 ```
 
-From an existing checkout, run:
-
-```bash
-./install.sh
-```
-
 The installer prompts for `sudo` and installs system packages, Go, Node.js,
 Codex, Claude Code, shared skills, AI-friendly shell tools (ShellCheck, `shfmt`,
 `jq`, ripgrep, and actionlint), and the `gh-release-flow` extension. When run
