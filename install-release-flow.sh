@@ -14,7 +14,10 @@ for command in gh make; do
 	}
 done
 
-gh extension install mordilloSan/gh-release-flow --force
+if ! extension_output=$(gh extension install mordilloSan/gh-release-flow --force 2>&1); then
+	printf '%s\n' "$extension_output" >&2
+	exit 1
+fi
 
 make_config="$HOME/.config/make/release-flow.mk"
 install -d "${make_config%/*}"
@@ -35,5 +38,3 @@ if [[ -s $HOME/.profile ]] && ! tail -c 1 "$HOME/.profile" | grep -q '^$'; then
 	printf '\n' >>"$HOME/.profile"
 fi
 grep -Fqxs -- "$makefiles_profile" "$HOME/.profile" || printf '%s\n' "$makefiles_profile" >>"$HOME/.profile"
-
-printf '\nRelease flow installed. Open a new login shell, then run make start-dev, make open-pr, or make merge-release.\n'

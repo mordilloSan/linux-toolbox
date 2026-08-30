@@ -85,8 +85,3 @@ install -Dm755 "$tmp_dir/ripgrep/rg" "$install_dir/rg"
 install -Dm755 "$tmp_dir/shfmt" "$install_dir/shfmt"
 install -Dm755 "$tmp_dir/actionlint/actionlint" "$install_dir/actionlint"
 install -Dm755 "$tmp_dir/jq" "$install_dir/jq"
-
-printf '\nShell tools installed in %s:\n' "$install_dir"
-for command in shellcheck shfmt jq rg actionlint; do
-	printf '  %s\n' "$command"
-done

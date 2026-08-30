@@ -31,6 +31,10 @@ email=${input:-$email}
 git config --global user.name "$name"
 git config --global user.email "$email"
 
+if [[ -n ${WSL_INTEROP:-} ]] && command -v explorer.exe >/dev/null 2>&1; then
+	gh config set browser explorer.exe
+fi
+
 if gh auth status --hostname github.com >/dev/null 2>&1; then
 	echo 'GitHub CLI is already authenticated.'
 else
