@@ -32,31 +32,37 @@ for command in actionlint curl jq npx rg shellcheck shfmt; do
 	}
 done
 
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
+printf ' [ INFO ] Installing Claude Code...\n'
 curl -fsSL https://claude.ai/install.sh | bash
-
 command -v claude >/dev/null || {
 	echo "Claude Code installation failed." >&2
 	exit 1
 }
+printf ' [  OK  ] Claude Code installed\n'
+
+printf ' [ INFO ] Installing Codex...\n'
+curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
 command -v codex >/dev/null || {
 	echo "Codex installation failed." >&2
 	exit 1
 }
+printf ' [  OK  ] Codex installed\n'
 
+printf ' [ INFO ] Installing AI plugins and skills...\n'
 claude plugin marketplace add DietrichGebert/ponytail
 claude plugin install ponytail@ponytail --yes
 codex plugin marketplace add DietrichGebert/ponytail
 codex plugin add ponytail@ponytail
 
 npx --yes skills add jakubkrehel/skills --global \
-	--agent codex claude-code --skill '*' --yes
+	--agent codex claude-code --skill '*' 
 npx --yes skills add vercel-labs/skills@find-skills --global \
-	--agent codex claude-code --yes
+	--agent codex claude-code 
 npx --yes skills add https://github.com/samber/cc-skills-golang --global \
 	--agent codex claude-code \
 	--skill golang-concurrency golang-context golang-security \
-	golang-troubleshooting --yes
+	golang-troubleshooting 
+printf ' [  OK  ] AI plugins and skills installed\n'
 
 if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	shell_guidance="- For shell-script work, use \`shellcheck <files> && shfmt -d <files>\` for validation; target relevant files instead of reading every script just to check it."
