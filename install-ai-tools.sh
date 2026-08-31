@@ -104,6 +104,11 @@ run_quiet npx --yes skills add vercel-labs/skills@find-skills --global \
 	--agent codex claude-code --yes
 ok "find-skills installed"
 
+info "Installing context-handoff..."
+run_quiet npx --yes skills add timyeou1234/context-handoff --global \
+	--agent codex claude-code --skill context-handoff --yes
+ok "context-handoff installed"
+
 go_skills=(golang-concurrency golang-context golang-security golang-troubleshooting)
 info "Installing Go skills..."
 run_quiet npx --yes skills add https://github.com/samber/cc-skills-golang --global \

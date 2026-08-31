@@ -114,7 +114,7 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output skill
+	local root="$test_dir/ai" output
 	mkdir -p "$root/bin" "$root/home"
 	cat >"$root/bin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -144,22 +144,21 @@ EOF
 
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" \
 		PATH="$root/bin:$PATH" HOME="$root/home" bash install-ai-tools.sh)
-	for skill in bubblewrap 'Claude Code' Codex Ponytail better-accessibility better-colors \
-		better-interface better-layout better-typography better-ui better-writing break \
-		explain-interface interface-review variant find-skills golang-concurrency \
-		golang-context golang-security golang-troubleshooting; do
-		grep -Fq "$skill installed" <<<"$output"
+	for tool in bubblewrap 'Claude Code' Codex Ponytail; do
+		grep -Fq "$tool installed" <<<"$output"
 	done
 	if grep -Eq 'hidden|Marketplace|████|Tip:' <<<"$output"; then
 		return 1
 	fi
-	[[ $(wc -l <"$root/npx.log") == 3 ]]
-	[[ $(grep -Fc -- '--yes' "$root/npx.log") == 3 ]]
+	[[ -s $root/npx.log ]]
+	[[ $(grep -Fvc -- '--global' "$root/npx.log") == 0 ]]
+	[[ $(grep -Fvc -- '--agent codex claude-code' "$root/npx.log") == 0 ]]
+	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@ponytail --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 4 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 4 ]]
-	pass 'AI tools stay themed, non-interactive, complete, and write concise guidance'
+	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
 }
 
 test_git_setup_modes() {

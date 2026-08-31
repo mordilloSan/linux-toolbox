@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go and latest Node.js LTS through NVM |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI | Codex CLI, Claude Code, Bubblewrap, Ponytail, interface skills, `find-skills`, and selected Go skills |
+| AI | Codex CLI, Claude Code, Bubblewrap, Ponytail, interface skills, `find-skills`, `context-handoff`, and selected Go skills |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL-family distributions using `apt`, `dnf`, or `yum`.
