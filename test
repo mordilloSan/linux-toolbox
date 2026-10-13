@@ -89,7 +89,7 @@ test_dependency_output() (
 	# shellcheck source=./install-dependencies.sh
 	source install-dependencies.sh
 	export PKG_MGR=apt
-	# shellcheck disable=SC2329
+	# shellcheck disable=SC2317,SC2329
 	apt-get() {
 		printf '%s\n' "${!#}" >>"$log"
 		echo 'hidden package-manager output'
