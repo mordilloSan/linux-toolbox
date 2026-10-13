@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go and latest Node.js LTS through NVM |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI | Codex CLI, Claude Code, Bubblewrap, Ponytail, interface skills, `find-skills`, `context-handoff`, and selected Go skills |
+| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap, Ponytail, interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL-family distributions using `apt`, `dnf`, or `yum`.
@@ -31,7 +31,34 @@ With `wget`:
 wget -qO- https://setup.engmariz.com | bash
 ```
 
-The installer asks for `sudo` before making system changes. Interactive runs separately offer Git identity setup, GitHub authentication, and Ubuntu cleanup.
+The installer asks for `sudo` before making system changes. It starts with a menu that shows what is already installed:
+
+```text
+ [?] Components to install or update
+     Up/Down move, Space or number toggles, Enter installs
+   > [x] 1) System packages: git, gh, make, tar             installed
+     [x] 2) Go                                              go1.27.2
+     [x] 3) Node.js LTS through nvm                         v24.21.0
+     [x] 4) Shell tools: jq, ShellCheck, rg, shfmt          installed
+     [x] 5) GitHub release flow                             not installed
+     [x] 6) Claude Code                                     2.1.296 (Claude Code)
+     [ ] 7) Codex CLI                                       not installed
+     [ ] 8) Ubuntu cleanup: remove Snap, disable MOTD news  Snap present
+```
+
+Components 1 to 7 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it. Enter installs the checked items. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection.
+
+Installed components are updated in place. Before a step replaces something you may have set up yourself, it asks first, and the default answer keeps what you have:
+
+| Step | It asks before |
+| --- | --- |
+| System packages | Replacing a GitHub CLI package source that has different content |
+| Go | Replacing another Go installation or a different `/etc/profile.d/go.sh` |
+| Node.js | Installing next to a Node.js that nvm does not manage, or changing a custom nvm default |
+| Shell tools | Adding a copy in `~/.local/bin` when the tool already exists elsewhere |
+| Release flow | Replacing a `~/.config/make/release-flow.mk` that has different content |
+| Git identity | Changing an identity that is already set |
+| GitHub | Re-running setup when the GitHub CLI is already authenticated |
 
 To review the entrypoint first:
 
@@ -49,10 +76,17 @@ Skip changes to global Codex and Claude instruction files:
 LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 bash install.sh
 ```
 
-Skip optional confirmation prompts:
+Skip the menu and every prompt. This installs or updates components 1 to 7, keeps anything you set up yourself, and skips the Ubuntu cleanup:
 
 ```bash
 LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh
+```
+
+Install the AI tools for a single agent directly:
+
+```bash
+./install-ai-tools.sh claude
+./install-ai-tools.sh codex
 ```
 
 ## Git and GitHub setup
@@ -74,9 +108,9 @@ Existing Git name and email values are kept when you press Enter. GitHub CLI aut
 
 ## Ubuntu cleanup
 
-The optional cleanup removes Snap applications, blocks `snapd` from being reinstalled, and disables Ubuntu MOTD news. This is destructive and intended only for Ubuntu hosts.
+Choose option 8 in the installer menu to run the cleanup. It removes Snap applications, blocks `snapd` from being reinstalled, and disables Ubuntu MOTD news. This is destructive and intended only for Ubuntu hosts.
 
-Review and run it directly:
+To review and run it on its own:
 
 ```bash
 curl -fLO https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main/ubuntu-cleanup.sh

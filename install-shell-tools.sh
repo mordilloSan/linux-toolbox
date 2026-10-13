@@ -20,6 +20,21 @@ ok() {
 	printf ' %s[%s  OK  %s]%s %s\n' "$GREY" "$GREEN" "$GREY" "$RESET" "$1"
 }
 
+# Ask on the terminal. No terminal or LINUX_TOOLBOX_NONINTERACTIVE=1 answers No.
+confirm() {
+	local answer
+	[[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]] || return 1
+	{ exec 3<>/dev/tty; } 2>/dev/null || return 1
+	printf '\n \033[33m[?]\033[0m %s [y/N] ' "$1" >&3
+	IFS= read -r answer <&3 || answer=
+	exec 3>&-
+	[[ $answer == [yY] ]]
+}
+
+notice() {
+	printf ' \033[90m[\033[33mNOTICE\033[90m]\033[0m %s\n' "$1"
+}
+
 for command in awk curl gzip install sha256sum tar; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
@@ -46,7 +61,17 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 install_dir=${LINUX_TOOLBOX_BIN_DIR:-$HOME/.local/bin}
 
-info "Installing or updating jq..."
+# Install a tool unless a copy outside install_dir exists and the user keeps it.
+wanted() {
+	local existing
+	existing=$(command -v "$1" || true)
+	[[ -z $existing || $existing == "$install_dir/$1" ]] && return 0
+	confirm "$1 found at $existing. Also install the latest $1 in $install_dir?" && return 0
+	notice "Kept $existing"
+	return 1
+}
+
+# jq is always downloaded because it resolves the other release assets.
 jq_asset="jq-linux-$go_arch"
 jq_checksum=$(curl -fsSL https://github.com/jqlang/jq/releases/latest/download/sha256sum.txt |
 	awk -v asset="$jq_asset" '$2 == asset { print $1 }')
@@ -57,8 +82,11 @@ jq_checksum=$(curl -fsSL https://github.com/jqlang/jq/releases/latest/download/s
 curl -fsSL "https://github.com/jqlang/jq/releases/latest/download/$jq_asset" -o "$tmp_dir/jq"
 printf '%s  %s\n' "$jq_checksum" "$tmp_dir/jq" | sha256sum --check --quiet
 chmod 755 "$tmp_dir/jq"
-install -Dm755 "$tmp_dir/jq" "$install_dir/jq"
-ok "jq installed"
+if wanted jq; then
+	info "Installing or updating jq..."
+	install -Dm755 "$tmp_dir/jq" "$install_dir/jq"
+	ok "jq installed"
+fi
 
 download() {
 	local repo=$1 pattern=$2 output=$3 asset url digest
@@ -83,28 +111,36 @@ download() {
 
 mkdir "$tmp_dir/shellcheck" "$tmp_dir/ripgrep" "$tmp_dir/actionlint"
 
-info "Installing or updating ShellCheck..."
-shellcheck_archive="$tmp_dir/shellcheck.tar.gz"
-download koalaman/shellcheck "\\.linux\\.${archive_arch}\\.tar\\.gz$" "$shellcheck_archive"
-tar -xzf "$shellcheck_archive" -C "$tmp_dir/shellcheck" --strip-components=1
-install -Dm755 "$tmp_dir/shellcheck/shellcheck" "$install_dir/shellcheck"
-ok "ShellCheck installed"
+if wanted shellcheck; then
+	info "Installing or updating ShellCheck..."
+	shellcheck_archive="$tmp_dir/shellcheck.tar.gz"
+	download koalaman/shellcheck "\\.linux\\.${archive_arch}\\.tar\\.gz$" "$shellcheck_archive"
+	tar -xzf "$shellcheck_archive" -C "$tmp_dir/shellcheck" --strip-components=1
+	install -Dm755 "$tmp_dir/shellcheck/shellcheck" "$install_dir/shellcheck"
+	ok "ShellCheck installed"
+fi
 
-info "Installing or updating ripgrep..."
-ripgrep_archive="$tmp_dir/ripgrep.tar.gz"
-download BurntSushi/ripgrep "-${archive_arch}-unknown-linux-musl\\.tar\\.gz$" "$ripgrep_archive"
-tar -xzf "$ripgrep_archive" -C "$tmp_dir/ripgrep" --strip-components=1
-install -Dm755 "$tmp_dir/ripgrep/rg" "$install_dir/rg"
-ok "ripgrep installed"
+if wanted rg; then
+	info "Installing or updating ripgrep..."
+	ripgrep_archive="$tmp_dir/ripgrep.tar.gz"
+	download BurntSushi/ripgrep "-${archive_arch}-unknown-linux-musl\\.tar\\.gz$" "$ripgrep_archive"
+	tar -xzf "$ripgrep_archive" -C "$tmp_dir/ripgrep" --strip-components=1
+	install -Dm755 "$tmp_dir/ripgrep/rg" "$install_dir/rg"
+	ok "ripgrep installed"
+fi
 
-info "Installing or updating shfmt..."
-download mvdan/sh "_linux_${go_arch}$" "$tmp_dir/shfmt"
-install -Dm755 "$tmp_dir/shfmt" "$install_dir/shfmt"
-ok "shfmt installed"
+if wanted shfmt; then
+	info "Installing or updating shfmt..."
+	download mvdan/sh "_linux_${go_arch}$" "$tmp_dir/shfmt"
+	install -Dm755 "$tmp_dir/shfmt" "$install_dir/shfmt"
+	ok "shfmt installed"
+fi
 
-info "Installing or updating actionlint..."
-actionlint_archive="$tmp_dir/actionlint.tar.gz"
-download rhysd/actionlint "_linux_${go_arch}\\.tar\\.gz$" "$actionlint_archive"
-tar -xzf "$actionlint_archive" -C "$tmp_dir/actionlint"
-install -Dm755 "$tmp_dir/actionlint/actionlint" "$install_dir/actionlint"
-ok "actionlint installed"
+if wanted actionlint; then
+	info "Installing or updating actionlint..."
+	actionlint_archive="$tmp_dir/actionlint.tar.gz"
+	download rhysd/actionlint "_linux_${go_arch}\\.tar\\.gz$" "$actionlint_archive"
+	tar -xzf "$actionlint_archive" -C "$tmp_dir/actionlint"
+	install -Dm755 "$tmp_dir/actionlint/actionlint" "$install_dir/actionlint"
+	ok "actionlint installed"
+fi
