@@ -50,10 +50,15 @@ EOF
 }
 
 test_node_installer() {
-	local home="$test_dir/node" output
-	mkdir -p "$home/.nvm"
+	local home="$test_dir/node" output path
+	mkdir -p "$home/.nvm/versions/node/v24.20.0/bin"
+	# A node already managed by nvm is not a foreign copy.
+	printf '#!/usr/bin/env bash\necho v24.20.0\n' >"$home/.nvm/versions/node/v24.20.0/bin/node"
+	chmod +x "$home/.nvm/versions/node/v24.20.0/bin/node"
+	path="$home/.nvm/versions/node/v24.20.0/bin:$PATH"
 	cat >"$home/.nvm/nvm.sh" <<'EOF'
 nvm() {
+	printf '%s\n' "$*" >>"$NVM_DIR/calls"
 	case $1 in
 	install) echo 'hidden nvm output' ;;
 	alias) ;;
@@ -61,10 +66,22 @@ nvm() {
 	esac
 }
 EOF
-	output=$(HOME="$home" NVM_DIR="$home/.nvm" bash install-node.sh 2>&1)
+	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-node.sh 2>&1)
 	[[ -z $output ]]
 	[[ $(readlink "$home/.nvm/versions/node/current") == "$home/.nvm/versions/node/v24.20.0" ]]
-	pass 'Node installer selects LTS quietly and maintains the current symlink'
+	grep -Fqx 'alias default lts/*' "$home/.nvm/calls"
+
+	mkdir -p "$home/.nvm/alias"
+	echo 22 >"$home/.nvm/alias/default"
+	rm "$home/.nvm/calls"
+	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-node.sh 2>&1)
+	grep -Fq 'Kept the nvm default 22' <<<"$output"
+	if grep -Fq 'alias default' "$home/.nvm/calls"; then
+		return 1
+	fi
+	pass 'Node installer selects LTS quietly and keeps a custom nvm default unless confirmed'
 }
 
 test_dependency_output() (
@@ -90,7 +107,7 @@ test_dependency_output() (
 )
 
 test_release_flow() {
-	local root="$test_dir/release-flow" first second profile
+	local root="$test_dir/release-flow" first second profile output
 	mkdir -p "$root/bin" "$root/home"
 	cat >"$root/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -110,22 +127,34 @@ EOF
 	[[ $(grep -Fxc -- "$profile" "$root/home/.bashrc") == 1 ]]
 	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
 		--no-print-directory --dry-run start-dev | grep -Fqx 'gh release-flow "start-dev"'
-	pass 'release-flow Make targets work and the shell notice appears only once'
+	printf 'custom:\n' >"$root/home/.config/make/release-flow.mk"
+	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" \
+		LINUX_TOOLBOX_NONINTERACTIVE=1 bash install-release-flow.sh)
+	grep -Fq 'Kept the existing' <<<"$output"
+	[[ $(<"$root/home/.config/make/release-flow.mk") == custom: ]]
+	pass 'release-flow Make targets work, notice once, and keep a custom Make file'
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output
+	local root="$test_dir/ai" output path
+	# Hide real agents installed under the developer's home directory.
+	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
+	path="$root/bin:$path"
 	mkdir -p "$root/bin" "$root/home"
 	cat >"$root/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 case $* in
+*claude-code-releases/latest*) exec echo 1.2.3 ;;
+*codex/channels/latest*) exec printf '{\n  "tag_name": "rust-v1.2.3"\n}\n' ;;
 *claude.ai/install.sh*) command=claude ;;
 *chatgpt.com/codex/install.sh*) command=codex ;;
 *) exit 1 ;;
 esac
+printf '%s\n' "$command" >>"$INSTALLER_LOG"
 mkdir -p "$HOME/.local/bin"
 cat >"$HOME/.local/bin/$command" <<'SCRIPT'
 #!/usr/bin/env bash
+[[ $* != --version ]] || exec echo "${0##*/} 1.2.3"
 printf '%s %s\n' "${0##*/}" "$*" >>"$AI_LOG"
 SCRIPT
 chmod +x "$HOME/.local/bin/$command"
@@ -142,9 +171,9 @@ EOF
 		ln -s noop "$root/bin/$command"
 	done
 
-	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" \
-		PATH="$root/bin:$PATH" HOME="$root/home" bash install-ai-tools.sh)
-	for tool in bubblewrap 'Claude Code' Codex Ponytail; do
+	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh)
+	for tool in bubblewrap 'Claude Code 1.2.3' 'Codex 1.2.3' Ponytail; do
 		grep -Fq "$tool installed" <<<"$output"
 	done
 	if grep -Eq 'hidden|Marketplace|████|Tip:' <<<"$output"; then
@@ -152,13 +181,38 @@ EOF
 	fi
 	[[ -s $root/npx.log ]]
 	[[ $(grep -Fvc -- '--global' "$root/npx.log") == 0 ]]
-	[[ $(grep -Fvc -- '--agent codex claude-code' "$root/npx.log") == 0 ]]
+	[[ $(grep -Fv context-handoff "$root/npx.log" | grep -Fvc -- '--agent codex claude-code') == 0 ]]
+	grep -Fq -- 'context-handoff --global --agent codex --skill' "$root/npx.log"
 	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@ponytail --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 4 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 4 ]]
 	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
+
+	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log"
+	mkdir -p "$root/home"
+	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude)
+	grep -Fq 'Claude Code 1.2.3 installed' <<<"$output"
+	if cat - "$root/agents.log" "$root/npx.log" <<<"$output" | grep -Eiq 'codex|context-handoff'; then
+		return 1
+	fi
+	[[ $(grep -Fvc -- '--agent claude-code' "$root/npx.log") == 0 ]]
+	[[ ! -e $root/home/.codex ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 4 ]]
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null
+	rm -f "$root/installers.log"
+	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude codex)
+	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
+	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
+	if grep -Eq 'Installing or updating (Claude Code|Codex)' <<<"$output"; then
+		return 1
+	fi
+	[[ ! -e $root/installers.log ]]
+	pass 'AI tools install only the selected agent and skip it when up to date'
 }
 
 test_git_setup_modes() {

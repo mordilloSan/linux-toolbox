@@ -30,6 +30,17 @@ Show() {
 	esac
 }
 
+# Ask on the terminal. No terminal or LINUX_TOOLBOX_NONINTERACTIVE=1 answers No.
+confirm() {
+	local answer
+	[[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]] || return 1
+	{ exec 3<>/dev/tty; } 2>/dev/null || return 1
+	printf '\n \033[33m[?]\033[0m %s [y/N] ' "$1" >&3
+	IFS= read -r answer <&3 || answer=
+	exec 3>&-
+	[[ $answer == [yY] ]]
+}
+
 # ---------- Distro Detection ----------
 DISTRO=""
 PKG_MGR=""
@@ -121,16 +132,29 @@ install_packages() {
 	# GitHub's repository avoids obsolete distro builds and is signed by its keyring.
 	Show 2 "Configuring the GitHub CLI repository..."
 	if [[ "$PKG_MGR" == apt ]]; then
-		install -d -m 755 /etc/apt/keyrings /etc/apt/sources.list.d
-		curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-			-o /etc/apt/keyrings/githubcli-archive-keyring.gpg
-		chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-		printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
-			"$(dpkg --print-architecture)" >/etc/apt/sources.list.d/github-cli.list
+		local source_file=/etc/apt/sources.list.d/github-cli.list source_line
+		source_line="deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+		if [[ -e $source_file && $(<"$source_file") != "$source_line" ]] &&
+			! confirm "$source_file has different content. Replace it with the official GitHub CLI source?"; then
+			Show 3 "Kept the existing GitHub CLI repository"
+		else
+			install -d -m 755 /etc/apt/keyrings /etc/apt/sources.list.d
+			curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+				-o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+			chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+			printf '%s\n' "$source_line" >"$source_file"
+		fi
 		apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
 	else
-		install -d -m 755 /etc/yum.repos.d
-		curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo
+		local repo_file=/etc/yum.repos.d/gh-cli.repo repo
+		repo=$(curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo)
+		if [[ -e $repo_file && $(<"$repo_file") != "$repo" ]] &&
+			! confirm "$repo_file has different content. Replace it with the official GitHub CLI repository?"; then
+			Show 3 "Kept the existing GitHub CLI repository"
+		else
+			install -d -m 755 /etc/yum.repos.d
+			printf '%s\n' "$repo" >"$repo_file"
+		fi
 	fi
 	Show 0 "GitHub CLI repository configured"
 

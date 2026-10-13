@@ -45,7 +45,8 @@ if [[ $mode != github ]]; then
 fi
 
 if [[ $mode != identity ]]; then
-	if [[ -n ${WSL_INTEROP:-} ]] && command -v explorer.exe >/dev/null 2>&1; then
+	if [[ -n ${WSL_INTEROP:-} && -z $(gh config get browser 2>/dev/null) ]] &&
+		command -v explorer.exe >/dev/null 2>&1; then
 		gh config set browser explorer.exe
 	fi
 	if gh auth status --hostname github.com >/dev/null 2>&1; then
