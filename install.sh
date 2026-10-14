@@ -108,7 +108,7 @@ choose_components() {
 	)
 	if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 		keys+=(cleanup)
-		labels+=('Ubuntu cleanup: remove Snap, disable MOTD news')
+		labels+=('Ubuntu cleanup: remove Snap, apport, multipath, kdump; disable MOTD news')
 		if command -v snap >/dev/null; then states+=('Snap present'); else states+=('Snap not present'); fi
 	fi
 	local count=${#keys[@]} picked=()

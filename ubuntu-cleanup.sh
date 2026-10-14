@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Ubuntu cleanup - remove MOTD noise, motd-news, and snap entirely
+# Ubuntu cleanup - remove MOTD noise, motd-news, snap, apport, multipath-tools, kdump-tools
 # Standalone host utility; not part of the LinuxIO install or uninstall flow.
 # Idempotent: safe to re-run.
 # Usage: sudo bash ubuntu-cleanup.sh
@@ -59,11 +59,22 @@ fi
 say "Stopping snapd services..."
 systemctl disable --now snapd.socket snapd.service snapd.seeded.service 2>/dev/null || true
 
-say "Purging snapd package..."
+say "Purging snapd, apport, multipath-tools and kdump-tools..."
 export DEBIAN_FRONTEND=noninteractive
-purge_packages=(snapd)
+# apport: crash reporter that phones home to Canonical.
+# multipath-tools: SAN-only; elsewhere multipathd just spams the journal.
+# kdump-tools: reserves crashkernel RAM for dumps nobody reads.
+purge_packages=(snapd apport multipath-tools kdump-tools)
 if dpkg-query -W -f='${Status}' gnome-software-plugin-snap >/dev/null 2>&1; then
 	purge_packages+=(gnome-software-plugin-snap)
+fi
+# apport and multipath-tools are hard Depends of the ubuntu-server
+# metapackage, so purging them drops it. Keep its other dependencies
+# out of reach of a later `apt autoremove`.
+if dpkg-query -W -f='${Status}' ubuntu-server 2>/dev/null | grep -q 'ok installed'; then
+	apt-cache depends --no-recommends --no-suggests ubuntu-server |
+		awk '/^ *Depends:/ && $2 !~ /^</ {print $2}' |
+		xargs -r apt-mark manual >/dev/null
 fi
 apt-get purge -y "${purge_packages[@]}"
 
@@ -82,5 +93,17 @@ Pin: release *
 Pin-Priority: -10
 EOF
 
-say "Done. MOTD noise removed, motd-news masked, snap fully purged."
+# ========== 3. cloud-init ==========
+# Only when cloud-init found no datasource (bare-metal installs): on cloud,
+# Proxmox and WSL hosts it provisions users, keys and network, so leave it.
+# Disable rather than purge so re-templating can turn it back on.
+if command -v cloud-id >/dev/null 2>&1 && [[ $(cloud-id 2>/dev/null) == none ]]; then
+	say "Disabling cloud-init (no datasource)..."
+	touch /etc/cloud/cloud-init.disabled
+else
+	say "cloud-init has a datasource or is absent, leaving it alone"
+fi
+
+say "Done. MOTD noise removed, motd-news masked, snap, apport, multipath-tools and kdump-tools purged."
 echo "    (To ever restore snap: rm /etc/apt/preferences.d/nosnap.pref && apt install snapd)"
+echo "    (To re-enable cloud-init: rm -f /etc/cloud/cloud-init.disabled)"
