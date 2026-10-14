@@ -108,7 +108,7 @@ Existing Git name and email values are kept when you press Enter. GitHub CLI aut
 
 ## Ubuntu cleanup
 
-Choose option 8 in the installer menu to run the cleanup. It removes Snap applications, blocks `snapd` from being reinstalled, and disables Ubuntu MOTD news. This is destructive and intended only for Ubuntu hosts.
+Choose option 8 in the installer menu to run the cleanup. It removes Snap applications, blocks `snapd` from being reinstalled, disables Ubuntu MOTD news, and purges `apport` (crash reporter), `multipath-tools` (SAN-only, spams the journal) and `kdump-tools` (reserves crashkernel RAM). On bare-metal installs where cloud-init has no datasource it also disables cloud-init (`/etc/cloud/cloud-init.disabled`); cloud, Proxmox and WSL hosts are left alone. This is destructive and intended only for Ubuntu hosts.
 
 To review and run it on its own:
 
