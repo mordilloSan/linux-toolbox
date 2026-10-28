@@ -186,8 +186,8 @@ EOF
 	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@ponytail --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
-	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 4 ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 4 ]]
+	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 7 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 7 ]]
 	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
 
 	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log"
@@ -200,7 +200,7 @@ EOF
 	fi
 	[[ $(grep -Fvc -- '--agent claude-code' "$root/npx.log") == 0 ]]
 	[[ ! -e $root/home/.codex ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 4 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 7 ]]
 	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null
 	rm -f "$root/installers.log"

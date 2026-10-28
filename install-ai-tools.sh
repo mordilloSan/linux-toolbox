@@ -171,6 +171,9 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	json_guidance="- For JSON, especially \`gh api\` output, use \`jq\` or \`gh --jq\` to extract only the fields needed instead of loading raw JSON."
 	search_guidance="- For codebase searches, use \`rg <pattern>\` and \`rg --files\` to narrow the relevant files instead of reading directories or whole files."
 	workflow_guidance="- For GitHub Actions workflows, run \`actionlint\` after changes."
+	read_guidance="- To read code, locate it with \`rg -n\` and read only the relevant line range; don't \`cat\` whole files or several files at once, since everything read stays in context for the rest of the session."
+	subagent_guidance="- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them."
+	commit_guidance="- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (\`type(scope): subject\`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked."
 	guidance_files=()
 	! selected codex || guidance_files+=("$HOME/.codex/AGENTS.md")
 	! selected claude || guidance_files+=("$HOME/.claude/CLAUDE.md")
@@ -179,7 +182,7 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 		if [[ -s $file ]] && ! tail -c 1 "$file" | grep -q '^$'; then
 			printf '\n' >>"$file"
 		fi
-		for guidance in "$shell_guidance" "$json_guidance" "$search_guidance" "$workflow_guidance"; do
+		for guidance in "$shell_guidance" "$json_guidance" "$search_guidance" "$workflow_guidance" "$read_guidance" "$subagent_guidance" "$commit_guidance"; do
 			grep -Fqxs -- "$guidance" "$file" || printf '%s\n' "$guidance" >>"$file"
 		done
 	done
