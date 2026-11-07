@@ -36,10 +36,13 @@ fi
 
 make_config="$HOME/.config/make/release-flow.mk"
 make_targets=$(printf '%s\n' \
-	'.PHONY: start-dev open-pr merge-release' \
+	'.PHONY: start-dev open-pr merge-release rf-version rf-upgrade' \
 	'' \
 	'start-dev open-pr merge-release:' \
-	$'\t@gh release-flow "$@"')
+	$'\t@gh release-flow "$@"' \
+	'' \
+	'rf-version rf-upgrade:' \
+	$'\t@gh release-flow "$(@:rf-%=%)"')
 if [[ -e $make_config && $(<"$make_config") != "$make_targets" ]] &&
 	! confirm "$make_config has different content. Replace it with the release-flow targets?"; then
 	notice "Kept the existing $make_config"

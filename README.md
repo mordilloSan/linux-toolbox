@@ -133,10 +133,14 @@ Local runs use the sibling scripts in the checkout. Piped installs download chil
 The installer provides release targets without requiring a repository Makefile:
 
 ```bash
-make start-dev VERSION=v1.7.0
+make start-dev  # suggests the next minor version after the latest tag; or pass VERSION=v1.7.0
 # Commit your changes, then:
 make open-pr
 make merge-release
+
+# Show or upgrade the installed gh-release-flow:
+make rf-version
+make rf-upgrade
 ```
 
 Run `source ~/.bashrc` or open a new terminal after first installing the targets. Release branches use the `dev/v*` naming convention.

@@ -127,6 +127,8 @@ EOF
 	[[ $(grep -Fxc -- "$profile" "$root/home/.bashrc") == 1 ]]
 	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
 		--no-print-directory --dry-run start-dev | grep -Fqx 'gh release-flow "start-dev"'
+	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
+		--no-print-directory --dry-run rf-upgrade | grep -Fqx 'gh release-flow "upgrade"'
 	printf 'custom:\n' >"$root/home/.config/make/release-flow.mk"
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash install-release-flow.sh)
