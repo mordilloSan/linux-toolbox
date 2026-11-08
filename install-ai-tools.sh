@@ -123,8 +123,14 @@ fi
 
 info "Installing or updating Ponytail..."
 if selected claude; then
-	run_quiet claude plugin marketplace add DietrichGebert/ponytail
-	run_quiet claude plugin install ponytail@ponytail --yes
+	# Ponytail comes from this repository's marketplace, pinned to the commit in .claude-plugin/marketplace.json.
+	claude plugin marketplace update linux-toolbox >/dev/null 2>&1 ||
+		run_quiet claude plugin marketplace add https://github.com/mordilloSan/linux-toolbox.git
+	run_quiet claude plugin install ponytail@linux-toolbox --yes
+	run_quiet claude plugin update ponytail@linux-toolbox
+	# Drop the unpinned copy older versions installed, only once the pinned one is in place.
+	claude plugin uninstall ponytail@ponytail >/dev/null 2>&1 || true
+	claude plugin marketplace remove ponytail >/dev/null 2>&1 || true
 fi
 if selected codex; then
 	run_quiet codex plugin marketplace add DietrichGebert/ponytail
@@ -137,28 +143,29 @@ interface_skills=(
 	better-typography better-ui better-writing break explain-interface
 	interface-review variant
 )
+# Skill sources are pinned to reviewed commits (#sha); bump a sha after reading the upstream changes.
 info "Installing interface skills..."
-run_quiet npx --yes skills add jakubkrehel/skills --global \
+run_quiet npx --yes skills add jakubkrehel/skills#157da62016338e8693dcff93d47154a9e36f2157 --global \
 	--agent "${skill_agents[@]}" --skill "${interface_skills[@]}" --yes
 for skill in "${interface_skills[@]}"; do
 	ok "$skill installed"
 done
 
 info "Installing find-skills..."
-run_quiet npx --yes skills add vercel-labs/skills@find-skills --global \
-	--agent "${skill_agents[@]}" --yes
+run_quiet npx --yes skills add vercel-labs/skills#d3701c11b1101251af14c9d148f026e1a47ebe17 --global \
+	--agent "${skill_agents[@]}" --skill find-skills --yes
 ok "find-skills installed"
 
 if selected codex; then
 	info "Installing context-handoff..."
-	run_quiet npx --yes skills add timyeou1234/context-handoff --global \
+	run_quiet npx --yes skills add timyeou1234/context-handoff#00f4ad1af40ecdcd3bad1c7c9a31423b0fa1b272 --global \
 		--agent codex --skill context-handoff --yes
 	ok "context-handoff installed"
 fi
 
 go_skills=(golang-concurrency golang-context golang-security golang-troubleshooting)
 info "Installing Go skills..."
-run_quiet npx --yes skills add https://github.com/samber/cc-skills-golang --global \
+run_quiet npx --yes skills add samber/cc-skills-golang#bb1d43d98a3f8ab639a0042f90d0ec524e39a477 --global \
 	--agent "${skill_agents[@]}" \
 	--skill "${go_skills[@]}" --yes
 for skill in "${go_skills[@]}"; do
@@ -218,28 +225,59 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 fi
 
 if selected claude && [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
-	info "Configuring Claude Code git safety rules..."
+	info "Configuring Claude Code settings..."
 	settings="$HOME/.claude/settings.json"
+	lint_hook="$HOME/.claude/hooks/linux-toolbox-lint.sh"
 	# Exit 2 blocks the call; any error of the hook itself falls through to exit 0, so it never blocks by mistake.
 	# shortcut: misses messages read from a file (git commit -F); move to a script hook if that shows up.
-	hook_command=$(
+	guard_command=$(
 		cat <<-'EOF'
 			jq -e '.tool_input.command // "" | test("co-authored-by"; "i") and test("\\bcommit\\b")' >/dev/null && { echo 'linux-toolbox: commits carry no Co-Authored-By trailer; remove it and run the command again.' >&2; exit 2; }; exit 0
 		EOF
 	)
-	mkdir -p "${settings%/*}"
+	mkdir -p "${lint_hook%/*}"
+	cat >"$lint_hook" <<'EOF'
+#!/usr/bin/env bash
+# Installed by linux-toolbox: lints the file Claude Code just edited.
+# Findings go to stderr with exit 2, which Claude reads; a missing tool or any other problem exits 0.
+file=$(jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
+[[ -f $file ]] || exit 0
+lint_shell() {
+	! command -v shellcheck >/dev/null || shellcheck -e SC1091 -- "$1"
+	# Formatting is only checked in repositories that already use shfmt.
+	if command -v shfmt >/dev/null && git -C "${1%/*}" grep -qI shfmt 2>/dev/null; then
+		shfmt -d -- "$1"
+	fi
+}
+case $file in
+*/.github/workflows/*.yml | */.github/workflows/*.yaml)
+	command -v actionlint >/dev/null || exit 0
+	# actionlint exits 1 for findings; other codes are its own errors.
+	findings=$(actionlint -no-color "$file" 2>&1) || [[ $? == 1 ]] || exit 0
+	;;
+*.sh | *.bash) findings=$(lint_shell "$file" 2>&1) ;;
+*)
+	head -n 1 -- "$file" | grep -Eq '^#!.*\b(ba|da)?sh\b' || exit 0
+	findings=$(lint_shell "$file" 2>&1)
+	;;
+esac
+[[ -n $findings ]] || exit 0
+printf 'linux-toolbox lint: fix these findings in %s\n%s\n' "$file" "$findings" >&2
+exit 2
+EOF
 	[[ -s $settings ]] || printf '{}\n' >"$settings"
-	# Adds missing rules without reordering yours, and replaces an older linux-toolbox hook instead of stacking it.
-	if updated=$(jq --arg command "$hook_command" '
+	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
+	if updated=$(jq --arg guard "$guard_command" --arg lint "bash \"\$HOME/.claude/hooks/${lint_hook##*/}\"" '
 		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
+		def without_ours: [(. // [])[] | select(any(.hooks[]?; (.command // "") | contains("linux-toolbox")) | not)];
 		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
 		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
-		| .hooks.PreToolUse = [(.hooks.PreToolUse // [])[] | select(any(.hooks[]?; (.command // "") | contains("linux-toolbox:")) | not)]
-			+ [{matcher: "Bash", hooks: [{type: "command", command: $command}]}]
+		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours) + [{matcher: "Bash", hooks: [{type: "command", command: $guard}]}]
+		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
 	' "$settings" 2>/dev/null) && [[ -n $updated ]]; then
 		printf '%s\n' "$updated" >"$settings"
-		ok "Claude Code git safety rules configured"
+		ok "Claude Code settings configured"
 	else
-		printf ' [NOTICE] %s is not valid JSON; git safety rules not added.\n' "$settings" >&2
+		printf ' [NOTICE] %s is not valid JSON; Claude Code settings left unchanged.\n' "$settings" >&2
 	fi
 fi

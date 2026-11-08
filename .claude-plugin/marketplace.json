@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "linux-toolbox",
+  "description": "Third-party Claude Code plugins installed by linux-toolbox, pinned to reviewed commits.",
+  "owner": {
+    "name": "mordilloSan",
+    "url": "https://github.com/mordilloSan"
+  },
+  "plugins": [
+    {
+      "name": "ponytail",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/DietrichGebert/ponytail.git",
+        "sha": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846"
+      },
+      "description": "Lazy senior dev mode: the shortest change that fully works. Its hooks need Node on PATH.",
+      "category": "productivity"
+    }
+  ]
+}

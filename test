@@ -138,7 +138,7 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output path begin end claude_md settings status=0
+	local root="$test_dir/ai" output path begin end claude_md settings hook status=0
 	# Hide real agents installed under the developer's home directory.
 	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
 	path="$root/bin:$path"
@@ -186,19 +186,35 @@ EOF
 	[[ -s $root/npx.log ]]
 	[[ $(grep -Fvc -- '--global' "$root/npx.log") == 0 ]]
 	[[ $(grep -Fv context-handoff "$root/npx.log" | grep -Fvc -- '--agent codex claude-code') == 0 ]]
-	grep -Fq -- 'context-handoff --global --agent codex --skill' "$root/npx.log"
+	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
+	# Every skill source is pinned to a commit.
+	[[ $(grep -Evc -- '^--yes skills add [^ ]+#[0-9a-f]{40} ' "$root/npx.log") == 0 ]]
 	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
-	grep -Fq 'claude plugin install ponytail@ponytail --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install ponytail@linux-toolbox --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	settings="$root/home/.claude/settings.json"
-	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],1]' ]]
+	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],1,1]' ]]
+	# The lint hook reports shell findings with exit 2 and stays quiet for clean or unrelated files.
+	hook="$root/home/.claude/hooks/linux-toolbox-lint.sh"
+	shellcheck "$hook"
+	# shellcheck disable=SC2016
+	printf '#!/bin/bash\necho $1\n' | tee "$root/bad" >"$root/notes.txt"
+	# shellcheck disable=SC2016
+	printf '#!/bin/bash\necho "$1"\n' >"$root/good.sh"
+	jq -n --arg f "$root/bad" '{tool_input: {file_path: $f}}' | bash "$hook" 2>"$root/lint.err" || status=$?
+	[[ $status == 2 ]]
+	grep -Fq SC2086 "$root/lint.err"
+	sed -i 1d "$root/notes.txt"
+	for file in good.sh notes.txt; do
+		jq -n --arg f "$root/$file" '{tool_input: {file_path: $f}}' | bash "$hook"
+	done
 	# Settings that are not valid JSON are left alone.
 	printf 'not json\n' >"$settings"
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude 2>&1)
-	grep -Fq 'settings.json is not valid JSON; git safety rules not added' <<<"$output"
+	grep -Fq 'settings.json is not valid JSON; Claude Code settings left unchanged' <<<"$output"
 	[[ $(<"$settings") == 'not json' ]]
 	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
 
@@ -246,8 +262,9 @@ EOF
 	fi
 	[[ ! -e $root/installers.log ]]
 	# Own settings stay, rules are not duplicated, and repeated runs keep a single linux-toolbox hook.
-	[[ $(jq -c '[.model, .permissions.deny, (.hooks.PreToolUse | length)]' "$settings") == '["opus",["Bash(rm -rf:*)","Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],2]' ]]
+	[[ $(jq -c '[.model, .permissions.deny, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '["opus",["Bash(rm -rf:*)","Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],2,1]' ]]
 	jq -r '.hooks.PreToolUse[1].hooks[0].command' "$settings" >"$root/hook.sh"
+	status=0
 	jq -n '{tool_input: {command: "git commit -m \"feat: x\n\nCo-Authored-By: A <a@b>\""}}' |
 		sh "$root/hook.sh" 2>/dev/null || status=$?
 	[[ $status == 2 ]]
