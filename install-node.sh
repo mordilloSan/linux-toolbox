@@ -43,12 +43,6 @@ if [[ -n $existing && $(readlink -f "$existing") != "$(readlink -m "$NVM_DIR")"/
 	notice "Kept the existing Node.js"
 	exit 0
 fi
-set_default=1
-if [[ -s $NVM_DIR/alias/default && $(<"$NVM_DIR/alias/default") != 'lts/*' ]] &&
-	! confirm "The nvm default is $(<"$NVM_DIR/alias/default"). Change it to the latest LTS?"; then
-	notice "Kept the nvm default $(<"$NVM_DIR/alias/default")"
-	set_default=
-fi
 # nvm refuses to run when ~/.npmrc sets prefix or globalconfig.
 if grep -Eqs '^[[:space:]]*(prefix|globalconfig)[[:space:]]*=' "$HOME/.npmrc"; then
 	echo "$HOME/.npmrc sets prefix or globalconfig, which nvm cannot use. Remove that line, then run the installer again." >&2
@@ -72,7 +66,20 @@ install_node() (
 	set +e
 	# shellcheck source=/dev/null
 	. "$NVM_DIR/nvm.sh" || return
-	local output current previous
+	local output current previous default latest set_default=1
+	if [[ -s $NVM_DIR/alias/default && $(<"$NVM_DIR/alias/default") != 'lts/*' ]]; then
+		default=$(<"$NVM_DIR/alias/default")
+		latest=$(nvm version-remote --lts 2>/dev/null)
+		# A default that already follows the latest LTS line (26, v26.1.0) needs no change. node and stable
+		# resolve to it today but move on to the next release, so they are still offered the change.
+		if [[ $default != node && $default != stable && $latest == v* ]] &&
+			[[ $(nvm version default 2>/dev/null | cut -d. -f1) == "${latest%%.*}" ]]; then
+			set_default=
+		elif ! confirm "The nvm default is $default. Change it to the latest LTS?"; then
+			notice "Kept the nvm default $default"
+			set_default=
+		fi
+	fi
 	if ! output=$(nvm install --lts --no-progress 2>&1); then
 		printf '%s\n' "$output" >&2
 		return 1

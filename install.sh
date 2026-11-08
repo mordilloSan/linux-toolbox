@@ -139,22 +139,27 @@ choose_components() {
 
 # Arrow-key checklist on fd 3. Uses the caller's keys, labels, states and picked.
 pick_components() {
-	local count=${#keys[@]} cursor=0 key rest i drawn=''
+	local count=${#keys[@]} cursor=0 key rest i drawn='' frame
 	printf '\n %s[?]%s Components to install or update\n' "$YELLOW" "$RESET" >&3
 	printf '     %sUp/Down move, Space or number toggles, Enter installs%s\n' "$GREY" "$RESET" >&3
+	# Hide the terminal cursor while the list redraws; restore it on exit or Ctrl+C.
+	printf '\033[?25l' >&3
+	trap 'printf "\033[?25h" >&3' EXIT
 	while :; do
-		# Redraw the list in place after the first pass.
-		[[ -z $drawn ]] || printf '\033[%dA' "$count" >&3
+		# Build the whole frame first and write it once, so the terminal never shows a half-drawn list.
+		# Redraw in place after the first pass. No line wrap: a wrapped row would make the cursor-up miss.
+		frame=''
+		[[ -z $drawn ]] || frame+=$(printf '\033[%dA' "$count")
 		drawn=1
-		# No line wrap while drawing: a wrapped row would make the cursor-up above miss.
-		printf '\033[?7l' >&3
+		frame+=$'\033[?7l'
 		for i in "${!keys[@]}"; do
-			printf '\r\033[K   %s %s %d) %-47s %s%s%s\n' \
+			frame+=$(printf '\r\033[K   %s %s %d) %-47s %s%s%s\n' \
 				"$( ((i == cursor)) && printf '%s>%s' "$GREEN" "$RESET" || echo ' ')" \
 				"$( ((picked[i])) && printf '%s[x]%s' "$GREEN" "$RESET" || echo '[ ]')" \
-				$((i + 1)) "${labels[i]}" "$GREY" "${states[i]}" "$RESET" >&3
+				$((i + 1)) "${labels[i]}" "$GREY" "${states[i]}" "$RESET")$'\n'
 		done
-		printf '\033[?7h' >&3
+		frame+=$'\033[?7h'
+		printf '%s' "$frame" >&3
 		IFS= read -rsn1 key <&3 || key=
 		case $key in
 		'') break ;;
@@ -176,6 +181,8 @@ pick_components() {
 			;;
 		esac
 	done
+	printf '\033[?25h' >&3
+	trap - EXIT
 	exec 3>&-
 }
 
