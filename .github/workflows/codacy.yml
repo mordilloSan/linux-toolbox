@@ -41,11 +41,14 @@ jobs:
 
       # Code scanning rejects several runs from the same tool, and Codacy runs some tools (opengrep) more than once.
       # Results keep ruleId and uri, so the per-run ruleIndex and artifact index can be dropped safely.
+      # MD013 (line length) is dropped: the README keeps paragraphs and tables on one line, and each hit on a
+      # changed line becomes a PR conversation that the main ruleset requires resolving before merge.
       - name: Merge SARIF runs per tool
         run: |
           jq '.runs |= (group_by(.tool.driver.name) | map(.[0] + {
             tool: {driver: (.[0].tool.driver + {rules: ([.[].tool.driver.rules[]] | unique_by(.id))})},
-            results: [.[].results[] | del(.ruleIndex, .locations[].physicalLocation.artifactLocation.index)],
+            results: [.[].results[] | select(.ruleId != "markdownlint_MD013")
+              | del(.ruleIndex, .locations[].physicalLocation.artifactLocation.index)],
             invocations: [.[].invocations[]],
             artifacts: ([.[].artifacts[]] | unique)
           }))' results.sarif > merged.sarif
