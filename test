@@ -153,6 +153,48 @@ test_dependency_output() (
 	pass 'system dependencies report each package, hide successful manager output, and wait for the apt lock'
 )
 
+test_ubuntu_cleanup() {
+	local root="$test_dir/cleanup" fs command
+	fs="$root/fs"
+	mkdir -p "$root/bin" "$fs/etc/update-motd.d" "$fs/etc/apt/preferences.d" "$fs/etc/cloud" \
+		"$fs/home/u/snap" "$fs/home/u/keep" "$fs/root/snap" "$fs/snap/core" "$fs/var/lib/snapd"
+	echo 'ID=ubuntu' >"$fs/etc/os-release"
+	touch "$fs/etc/update-motd.d/50-motd-news" "$fs/etc/update-motd.d/00-header"
+	cat >"$root/bin/mock" <<'EOF'
+#!/usr/bin/env bash
+printf '%s %s\n' "${0##*/}" "$*" >>"$CLEANUP_LOG"
+case ${0##*/} in
+snap) [[ $1 != list ]] || printf '%s\n' Name core lxd snapd | grep -vxFf <(sed -n 's/^snap remove --purge //p' "$CLEANUP_LOG") ;;
+dpkg-query)
+	[[ ${!#} == ubuntu-wsl ]] || exit 1
+	echo 'install ok installed'
+	;;
+apt-cache) printf '%s\n' ubuntu-wsl '  Depends: curl' ' |Depends: vim' '  Depends: nano' '  Depends: <editor>' '  Recommends: lsof' ;;
+cloud-id) echo none ;;
+esac
+exit 0
+EOF
+	chmod +x "$root/bin/mock"
+	for command in snap systemctl dpkg-query apt-cache apt-mark apt-get cloud-id; do
+		ln -s mock "$root/bin/$command"
+	done
+	# Run as a regular user, with every system path moved into the test folder in one pass.
+	sed -E -e 's/EUID -ne 0/EUID -lt 0/' -e "s#(^|[[:space:]\">(])/(etc|var|home|root|snap)\b#\1$fs/\2#g" \
+		ubuntu-cleanup.sh >"$root/cleanup.sh"
+	# A system path the rewrite missed would hit the real machine.
+	if sed "s#$fs/##g" "$root/cleanup.sh" | grep -En '(^|[^[:alnum:]_}.-])/(etc|var|home|root|snap)\b'; then
+		return 1
+	fi
+	CLEANUP_LOG="$root/log" PATH="$root/bin:$PATH" bash "$root/cleanup.sh" >/dev/null
+	[[ -d $fs/home/u/keep && ! -e $fs/home/u/snap && ! -e $fs/root/snap && ! -e $fs/snap && ! -e $fs/var/lib/snapd ]]
+	[[ -e $fs/etc/update-motd.d/00-header && ! -e $fs/etc/update-motd.d/50-motd-news ]]
+	[[ $(grep -c '^snap remove' "$root/log") == 3 && $(grep '^snap remove' "$root/log" | tail -n 1) == 'snap remove --purge snapd' ]]
+	grep -Fqx 'apt-mark manual curl vim nano' "$root/log"
+	grep -Fqx 'apt-get -o DPkg::Lock::Timeout=300 purge -y snapd apport multipath-tools kdump-tools' "$root/log"
+	[[ -e $fs/etc/apt/preferences.d/nosnap.pref && -e $fs/etc/cloud/cloud-init.disabled ]]
+	pass 'Ubuntu cleanup removes only snap folders, guards WSL packages, and pins snapd away'
+}
+
 test_release_flow() {
 	local root="$test_dir/release-flow" first second profile output
 	mkdir -p "$root/bin" "$root/home"
@@ -372,6 +414,7 @@ EOF
 test_installer_orchestration
 test_node_installer
 test_dependency_output
+test_ubuntu_cleanup
 test_release_flow
 test_ai_tools
 test_git_setup_modes
