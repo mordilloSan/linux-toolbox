@@ -157,6 +157,18 @@ if selected codex; then
 fi
 ok "Ponytail installed"
 
+if selected claude; then
+	info "Installing the Go and TypeScript language server plugins..."
+	# Anthropic's official marketplace; Claude Code normally has it already.
+	claude plugin marketplace update claude-plugins-official >/dev/null 2>&1 ||
+		run_quiet claude plugin marketplace add anthropics/claude-plugins-official
+	# They run gopls and typescript-language-server, which the Go and Node.js steps install.
+	for plugin in gopls-lsp typescript-lsp; do
+		run_quiet claude plugin install "$plugin@claude-plugins-official" --yes
+		ok "$plugin installed"
+	done
+fi
+
 interface_skills=(
 	better-accessibility better-colors better-interface better-layout
 	better-typography better-ui better-writing break explain-interface
@@ -184,7 +196,10 @@ if selected codex; then
 	ok "context-handoff installed"
 fi
 
-go_skills=(golang-concurrency golang-context golang-security golang-troubleshooting)
+go_skills=(
+	golang-concurrency golang-context golang-error-handling golang-lint golang-modernize
+	golang-security golang-stretchr-testify golang-testing golang-troubleshooting
+)
 info "Installing Go skills..."
 run_quiet npx --yes skills@1.7.6 add samber/cc-skills-golang#bb1d43d98a3f8ab639a0042f90d0ec524e39a477 --global \
 	--agent "${skill_agents[@]}" \

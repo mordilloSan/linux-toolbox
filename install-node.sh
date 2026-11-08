@@ -82,6 +82,11 @@ install_node() (
 	if [[ $previous == v* && $previous != "$current" ]]; then
 		nvm reinstall-packages "$previous" >/dev/null 2>&1 || notice "Could not copy global npm packages from Node.js $previous"
 	fi
+	# Claude Code's typescript-lsp plugin runs typescript-language-server, which needs typescript next to it.
+	if ! output=$(npm install -g --no-fund --no-audit typescript typescript-language-server 2>&1); then
+		printf '%s\n' "$output" >&2
+		notice "Could not install the TypeScript language server; run: npm install -g typescript typescript-language-server"
+	fi
 )
 
 install_node

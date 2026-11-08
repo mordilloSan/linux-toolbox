@@ -240,6 +240,13 @@ if selected go; then
 	# The root step cannot see a Go on the user's PATH.
 	[[ -z $go_path || $(readlink -f "$go_path") == /usr/local/go-versions/* ]] ||
 		notice "go on your PATH is $go_path, not /usr/local/bin/go."
+	# Claude Code's gopls-lsp plugin runs gopls; as the user it lands in GOBIN (~/go/bin by default).
+	if output=$(cd "$HOME" && go install golang.org/x/tools/gopls@latest 2>&1 </dev/null); then
+		ok "gopls installed"
+	else
+		printf '%s\n' "$output" >&2
+		notice "Could not install gopls; run: go install golang.org/x/tools/gopls@latest"
+	fi
 	commands+=(go)
 fi
 

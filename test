@@ -41,6 +41,7 @@ EOF
 	grep -Fq 'Git identity setup skipped' <<<"$output"
 	grep -Fq 'GitHub authentication setup skipped' <<<"$output"
 	grep -Fq 'Open a new terminal' <<<"$output"
+	grep -Fq 'gopls installed' <<<"$output"
 	diff -u "$root/expected" "$root/remote"
 
 	# A failed download stops the run with a FAILED line, before any later step.
@@ -80,7 +81,12 @@ test_node_installer() {
 	# A node already managed by nvm is not a foreign copy.
 	printf '#!/usr/bin/env bash\necho v24.20.0\n' >"$home/.nvm/versions/node/v24.20.0/bin/node"
 	chmod +x "$home/.nvm/versions/node/v24.20.0/bin/node"
-	path="$home/.nvm/versions/node/v24.20.0/bin:$PATH"
+	# A fake npm comes first on every PATH below, so no run touches the developer's real global packages.
+	mkdir -p "$home/fake"
+	# shellcheck disable=SC2016
+	printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"$NVM_DIR/npm-calls"\n' >"$home/fake/npm"
+	chmod +x "$home/fake/npm"
+	path="$home/fake:$home/.nvm/versions/node/v24.20.0/bin:$PATH"
 	cat >"$home/.nvm/nvm.sh" <<'EOF'
 nvm() {
 	printf '%s\n' "$*" >>"$NVM_DIR/calls"
@@ -96,6 +102,7 @@ EOF
 	[[ -z $output ]]
 	[[ $(readlink "$home/.nvm/versions/node/current") == "$home/.nvm/versions/node/v24.20.0" ]]
 	grep -Fqx 'alias default lts/*' "$home/.nvm/calls"
+	grep -Fqx 'install -g --no-fund --no-audit typescript typescript-language-server' "$home/.nvm/npm-calls"
 
 	mkdir -p "$home/.nvm/alias"
 	echo 22 >"$home/.nvm/alias/default"
@@ -114,7 +121,7 @@ EOF
 		chmod +x "$home/system/node"
 		rm -f "$home/system/npx" "$home/.nvm/calls"
 		[[ ${version#*:} == none ]] || cp "$home/system/node" "$home/system/npx"
-		output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/fake:$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
 			bash install-node.sh 2>&1)
 		if [[ $version == v24.0.0:npx ]]; then
 			grep -Fq 'Kept the existing Node.js' <<<"$output"
@@ -426,6 +433,8 @@ EOF
 	# Every skill source is pinned to a commit.
 	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@linux-toolbox --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
