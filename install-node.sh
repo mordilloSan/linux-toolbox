@@ -31,7 +31,8 @@ notice() {
 
 export NVM_DIR=${NVM_DIR:-$HOME/.nvm}
 existing=$(command -v node || true)
-if [[ -n $existing && $(readlink -f "$existing") != "$NVM_DIR"/* ]] &&
+# A Node.js without its own npx (the distro nodejs package) cannot run the later steps, so it is not kept.
+if [[ -n $existing && $(readlink -f "$existing") != "$NVM_DIR"/* && -x ${existing%/*}/npx ]] &&
 	! confirm "Node.js $("$existing" --version 2>/dev/null) found at $existing. Install Node.js LTS with nvm? nvm's copy comes first in new shells."; then
 	notice "Kept the existing Node.js"
 	exit 0
@@ -49,6 +50,8 @@ if [[ ! -s $NVM_DIR/nvm.sh ]]; then
 		echo "Invalid nvm version: $nvm_version" >&2
 		exit 1
 	}
+	# nvm's installer rejects a missing NVM_DIR unless it is nvm's own default, which XDG_CONFIG_HOME changes.
+	mkdir -p "$NVM_DIR"
 	curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
 		METHOD=script bash >/dev/null
 fi

@@ -16,16 +16,19 @@ readonly LINE=' ─────────────────────�
 
 base_url=https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main
 script_dir=
-if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
+# Only a checkout runs its sibling scripts; a release copy (base_url rewritten) always runs its own release's.
+if [[ $base_url == */main && -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
 	script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fi
 
 load_script() {
-	local name=$1
+	local name=$1 text
 	if [[ -n $script_dir && -f $script_dir/$name ]]; then
 		cat -- "$script_dir/$name"
 	else
-		"${fetch[@]}" "$base_url/$name"
+		# Download in full first: bash would run the partial last line of a cut-off download.
+		text=$("${fetch[@]}" "$base_url/$name") || fail "Unable to download $name."
+		printf '%s\n' "$text"
 	fi
 }
 
@@ -108,7 +111,7 @@ choose_components() {
 	)
 	if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 		keys+=(cleanup)
-		labels+=('Ubuntu cleanup: remove Snap, apport, multipath, kdump; disable MOTD news')
+		labels+=('Ubuntu cleanup: remove Snaps and all Snap data')
 		if command -v snap >/dev/null; then states+=('Snap present'); else states+=('Snap not present'); fi
 	fi
 	local count=${#keys[@]} picked=()
@@ -141,12 +144,15 @@ pick_components() {
 		# Redraw the list in place after the first pass.
 		[[ -z $drawn ]] || printf '\033[%dA' "$count" >&3
 		drawn=1
+		# No line wrap while drawing: a wrapped row would make the cursor-up above miss.
+		printf '\033[?7l' >&3
 		for i in "${!keys[@]}"; do
 			printf '\r\033[K   %s %s %d) %-47s %s%s%s\n' \
 				"$( ((i == cursor)) && printf '%s>%s' "$GREEN" "$RESET" || echo ' ')" \
 				"$( ((picked[i])) && printf '%s[x]%s' "$GREEN" "$RESET" || echo '[ ]')" \
 				$((i + 1)) "${labels[i]}" "$GREY" "${states[i]}" "$RESET" >&3
 		done
+		printf '\033[?7h' >&3
 		IFS= read -rsn1 key <&3 || key=
 		case $key in
 		'') break ;;
@@ -193,6 +199,7 @@ fi
 sudo -v || fail "Unable to authenticate with sudo."
 ok "Linux $(uname -m) is supported"
 
+user_path=$PATH
 # Detect tools from earlier runs that are not on the default PATH yet.
 export PATH="$HOME/.nvm/versions/node/current/bin:$HOME/.local/bin:$PATH"
 choose_components
@@ -245,9 +252,7 @@ fi
 
 if ((${#agents[@]})); then
 	run_step "AI tools and skills"
-	if ! ai_tools_script=$(load_script install-ai-tools.sh); then
-		fail "Unable to download the AI tools installer."
-	fi
+	ai_tools_script=$(load_script install-ai-tools.sh)
 	if ! bash -c "$ai_tools_script" -- "${agents[@]}" </dev/null; then
 		fail "Unable to install AI tools and skills."
 	fi
@@ -300,6 +305,14 @@ if selected cleanup; then
 	step "Ubuntu cleanup"
 	load_script ubuntu-cleanup.sh | sudo bash
 	ok "Ubuntu cleanup complete"
+fi
+
+# ~/.profile adds ~/.local/bin only when it existed at login, so new terminals would miss these tools.
+if [[ -d $HOME/.local/bin && :$user_path: != *":$HOME/.local/bin:"* ]]; then
+	# shellcheck disable=SC2016
+	path_line='export PATH="$HOME/.local/bin:$PATH"'
+	grep -Fqxs -- "$path_line" "$HOME/.bashrc" || printf '\n%s\n' "$path_line" >>"$HOME/.bashrc"
+	notice "Open a new terminal so your shell finds the tools in ~/.local/bin."
 fi
 
 banner "Setup complete"

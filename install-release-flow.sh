@@ -42,8 +42,14 @@ make_targets=$(printf '%s\n' \
 	$'\t@gh release-flow "$@"' \
 	'' \
 	'rf-version rf-upgrade:' \
-	$'\t@gh release-flow "$(@:rf-%=%)"')
-if [[ -e $make_config && $(<"$make_config") != "$make_targets" ]] &&
+	$'\t@gh release-flow "$(@:rf-%=%)"' \
+	'' \
+	'# Keep project Makefiles that read MAKEFILE_LIST unaware of this file.' \
+	'MAKEFILE_LIST :=')
+# The v1.10.0 targets: this script wrote them, so they are replaced without asking.
+old_targets=$(printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' \
+	'start-dev open-pr merge-release:' $'\t@gh release-flow "$@"')
+if [[ -e $make_config && $(<"$make_config") != "$make_targets" && $(<"$make_config") != "$old_targets" ]] &&
 	! confirm "$make_config has different content. Replace it with the release-flow targets?"; then
 	notice "Kept the existing $make_config"
 else

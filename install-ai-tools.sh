@@ -57,7 +57,7 @@ if ! command -v bwrap >/dev/null; then
 		exit 1
 	}
 	if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
-		run_quiet sudo apt-get install -y -qq bubblewrap
+		run_quiet sudo apt-get -o DPkg::Lock::Timeout=300 install -y -qq bubblewrap
 	elif command -v dnf >/dev/null && command -v rpm >/dev/null; then
 		run_quiet sudo dnf install -y -q bubblewrap
 	elif command -v yum >/dev/null && command -v rpm >/dev/null; then
@@ -269,7 +269,7 @@ EOF
 	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
 	if updated=$(jq --arg guard "$guard_command" --arg lint "bash \"\$HOME/.claude/hooks/${lint_hook##*/}\"" '
 		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
-		def without_ours: [(. // [])[] | select(any(.hooks[]?; (.command // "") | contains("linux-toolbox")) | not)];
+		def without_ours: [(. // [])[] | del(.hooks[]? | select((.command // "") | test("/hooks/linux-toolbox-lint\\.sh|linux-toolbox: commits"))) | select(.hooks != [])];
 		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
 		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
 		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours) + [{matcher: "Bash", hooks: [{type: "command", command: $guard}]}]

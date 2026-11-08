@@ -92,7 +92,7 @@ pkg_install() {
 	for package; do
 		Show 2 "Installing or updating ${package}..."
 		if [[ "$PKG_MGR" == apt ]]; then
-			installer=(apt-get install -y -qq "$package")
+			installer=(apt-get -o DPkg::Lock::Timeout=300 install -y -qq "$package")
 		else
 			installer=("$PKG_MGR" install -y -q "$package")
 		fi
@@ -102,6 +102,20 @@ pkg_install() {
 		fi
 		Show 0 "${package} installed"
 	done
+}
+
+# apt-get update ignores DPkg::Lock::Timeout, so wait while another apt refreshes the lists.
+apt_update() {
+	local output tries=0
+	# LC_ALL=C: sudo keeps the user's language, and the lock check below matches apt's English text.
+	until output=$(LC_ALL=C apt-get update -qq 2>&1 >/dev/null); do
+		if [[ $output != *'Could not get lock'* ]] || ((++tries >= 30)); then
+			printf '%s\n' "$output" >&2
+			Show 1 "Failed to update package lists"
+		fi
+		sleep 10
+	done
+	[[ -z $output ]] || printf '%s\n' "$output" >&2
 }
 
 # ---------- Packages ----------
@@ -118,13 +132,12 @@ install_packages() {
 
 	local bootstrap=()
 	pkg_installed ca-certificates || bootstrap+=(ca-certificates)
-	if ! command -v curl >/dev/null 2>&1; then
-		bootstrap+=(curl)
-	fi
+	# A Snap curl cannot write outside the home folder, so install the distro curl.
+	case $(command -v curl || true) in "" | /snap/*) bootstrap+=(curl) ;; esac
 	if ((${#bootstrap[@]})); then
 		if [[ "$PKG_MGR" == apt ]]; then
 			Show 2 "Updating package lists..."
-			apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
+			apt_update
 		fi
 		pkg_install "${bootstrap[@]}"
 	fi
@@ -134,7 +147,11 @@ install_packages() {
 	if [[ "$PKG_MGR" == apt ]]; then
 		local source_file=/etc/apt/sources.list.d/github-cli.list source_line
 		source_line="deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
-		if [[ -e $source_file && $(<"$source_file") != "$source_line" ]] &&
+		# Another file may already hold this source, e.g. github-cli.sources written by apt modernize-sources.
+		if grep -qsE --exclude=github-cli.list '^[^#]*cli\.github\.com/packages' \
+			/etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; then
+			Show 3 "Kept the GitHub CLI repository that is already configured"
+		elif [[ -e $source_file && $(<"$source_file") != "$source_line" ]] &&
 			! confirm "$source_file has different content. Replace it with the official GitHub CLI source?"; then
 			Show 3 "Kept the existing GitHub CLI repository"
 		else
@@ -144,7 +161,7 @@ install_packages() {
 			chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
 			printf '%s\n' "$source_line" >"$source_file"
 		fi
-		apt-get update -qq >/dev/null || Show 1 "Failed to update package lists"
+		apt_update
 	else
 		local repo_file=/etc/yum.repos.d/gh-cli.repo repo
 		repo=$(curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo)

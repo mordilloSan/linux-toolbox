@@ -43,7 +43,7 @@ The installer asks for `sudo` before making system changes. It starts with a men
      [x] 5) GitHub release flow                             not installed
      [x] 6) Claude Code                                     2.1.296 (Claude Code)
      [ ] 7) Codex CLI                                       not installed
-     [ ] 8) Ubuntu cleanup: remove Snap, disable MOTD news  Snap present
+     [ ] 8) Ubuntu cleanup: remove Snaps and all Snap data   Snap present
 ```
 
 Components 1 to 7 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it. Enter installs the checked items. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection.
@@ -54,7 +54,7 @@ Installed components are updated in place. Before a step replaces something you 
 | --- | --- |
 | System packages | Replacing a GitHub CLI package source that has different content |
 | Go | Replacing another Go installation or a different `/etc/profile.d/go.sh` |
-| Node.js | Installing next to a Node.js that nvm does not manage, or changing a custom nvm default |
+| Node.js | Installing next to a Node.js that nvm does not manage (one without `npx` is not kept), or changing a custom nvm default |
 | Shell tools | Adding a copy in `~/.local/bin` when the tool already exists elsewhere |
 | Release flow | Replacing a `~/.config/make/release-flow.mk` that has different content |
 | Git identity | Changing an identity that is already set |
@@ -108,7 +108,7 @@ Existing Git name and email values are kept when you press Enter. GitHub CLI aut
 
 ## Ubuntu cleanup
 
-Choose option 8 in the installer menu to run the cleanup. It removes Snap applications, blocks `snapd` from being reinstalled, disables Ubuntu MOTD news, and purges `apport` (crash reporter), `multipath-tools` (SAN-only, spams the journal) and `kdump-tools` (reserves crashkernel RAM). On bare-metal installs where cloud-init has no datasource it also disables cloud-init (`/etc/cloud/cloud-init.disabled`); cloud, Proxmox and WSL hosts are left alone. This is destructive and intended only for Ubuntu hosts.
+Choose option 8 in the installer menu to run the cleanup. It removes Snap applications together with every user's Snap app data, with no backup: on Ubuntu Desktop that includes the Firefox and Thunderbird profiles, so back them up first. It also blocks `snapd` from being reinstalled, disables Ubuntu MOTD news, and purges `apport` (crash reporter), `multipath-tools` (SAN-only, spams the journal) and `kdump-tools` (reserves crashkernel RAM). On bare-metal installs where cloud-init has no datasource it also disables cloud-init (`/etc/cloud/cloud-init.disabled`); cloud, Proxmox and WSL hosts are left alone. This is destructive and intended only for Ubuntu hosts.
 
 To review and run it on its own:
 

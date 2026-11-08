@@ -18,6 +18,7 @@ case ${0##*/} in
 curl)
 	url=${!#}
 	printf '%s\n' "${url##*/}" >>"$MOCK_CURL_LOG"
+	[[ ${url##*/} != "${MOCK_CURL_FAIL:-}" ]] || exit 22
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0'
 	;;
 sudo) [[ ${1:-} == -v ]] || exec "$@" ;;
@@ -30,12 +31,22 @@ EOF
 	printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
 		install-shell-tools.sh install-release-flow.sh install-ai-tools.sh >"$root/expected"
 
+	mkdir -p "$root/home/.local/bin"
 	output=$(MOCK_CURL_LOG="$root/remote" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash <install.sh)
 	grep -Fq 'Setup complete' <<<"$output"
 	grep -Fq 'Git identity setup skipped' <<<"$output"
 	grep -Fq 'GitHub authentication setup skipped' <<<"$output"
+	grep -Fq 'Open a new terminal' <<<"$output"
 	diff -u "$root/expected" "$root/remote"
+
+	# A failed download stops the run with a FAILED line, before any later step.
+	if output=$(MOCK_CURL_FAIL=install-node.sh MOCK_CURL_LOG="$root/failed" PATH="$root/bin:$PATH" \
+		HOME="$root/home" LINUX_TOOLBOX_NONINTERACTIVE=1 bash <install.sh 2>&1); then
+		return 1
+	fi
+	grep -Fq 'Unable to download install-node.sh' <<<"$output"
+	[[ $(tail -n 1 "$root/failed") == install-node.sh ]]
 
 	cp install.sh "$root/local/"
 	while read -r script; do
@@ -46,7 +57,16 @@ EOF
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
 	diff -u "$root/expected" "$root/local.log"
 	[[ ! -e $root/unexpected-curl ]]
-	pass 'installer uses remote scripts when piped and local scripts from a checkout'
+	# shellcheck disable=SC2016
+	path_line='export PATH="$HOME/.local/bin:$PATH"'
+	[[ $(grep -Fxc -- "$path_line" "$root/home/.bashrc") == 1 ]]
+
+	# A release copy (base_url pinned by release.yml) ignores same-named files next to it.
+	sed 's#^base_url=.*#base_url=https://example.invalid/releases/download/v9.9.9#' install.sh >"$root/local/install.sh"
+	MOCK_CURL_LOG="$root/pinned" PATH="$root/bin:$PATH" HOME="$root/home" \
+		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
+	diff -u "$root/expected" "$root/pinned"
+	pass 'installer uses remote scripts when piped or pinned, and local scripts from a checkout'
 }
 
 test_node_installer() {
@@ -81,7 +101,20 @@ EOF
 	if grep -Fq 'alias default' "$home/.nvm/calls"; then
 		return 1
 	fi
-	pass 'Node installer selects LTS quietly and keeps a custom nvm default unless confirmed'
+
+	# A foreign Node.js is kept only when it has its own npx.
+	mkdir -p "$home/system"
+	printf '#!/usr/bin/env bash\necho v18.19.1\n' >"$home/system/node"
+	chmod +x "$home/system/node"
+	rm "$home/.nvm/calls"
+	HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-node.sh >/dev/null 2>&1
+	grep -Fq 'install --lts' "$home/.nvm/calls"
+	cp "$home/system/node" "$home/system/npx"
+	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-node.sh 2>&1)
+	grep -Fq 'Kept the existing Node.js' <<<"$output"
+	pass 'Node installer selects LTS quietly, keeps a custom nvm default unless confirmed, and replaces a Node.js without npx'
 }
 
 test_dependency_output() (
@@ -103,7 +136,21 @@ test_dependency_output() (
 		return 1
 	fi
 	diff -u <(printf '%s\n' git gh) "$log"
-	pass 'system dependencies report each package and hide successful manager output'
+
+	# apt-get update waits while another apt holds the package lists lock.
+	# shellcheck disable=SC2317,SC2329
+	sleep() { :; }
+	# shellcheck disable=SC2317,SC2329
+	apt-get() {
+		printf '%s\n' "$*" >>"$log.update"
+		(($(wc -l <"$log.update") > 2)) || {
+			echo 'E: Could not get lock /var/lib/apt/lists/lock' >&2
+			return 100
+		}
+	}
+	apt_update
+	[[ $(wc -l <"$log.update") == 3 ]]
+	pass 'system dependencies report each package, hide successful manager output, and wait for the apt lock'
 )
 
 test_release_flow() {
@@ -129,6 +176,16 @@ EOF
 		--no-print-directory --dry-run start-dev | grep -Fqx 'gh release-flow "start-dev"'
 	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
 		--no-print-directory --dry-run rf-upgrade | grep -Fqx 'gh release-flow "upgrade"'
+	# Project Makefiles that read MAKEFILE_LIST do not see the global file.
+	# shellcheck disable=SC2016
+	printf 'where:\n\t@echo $(firstword $(MAKEFILE_LIST))\n' >"$root/Makefile"
+	[[ $(MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" --no-print-directory where) == Makefile ]]
+	# The file v1.10.0 wrote is replaced without asking, so the new targets appear.
+	printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' 'start-dev open-pr merge-release:' \
+		$'\t@gh release-flow "$@"' >"$root/home/.config/make/release-flow.mk"
+	GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-release-flow.sh >/dev/null
+	grep -Fq 'rf-version rf-upgrade:' "$root/home/.config/make/release-flow.mk"
 	printf 'custom:\n' >"$root/home/.config/make/release-flow.mk"
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash install-release-flow.sh)
@@ -269,6 +326,15 @@ EOF
 		sh "$root/hook.sh" 2>/dev/null || status=$?
 	[[ $status == 2 ]]
 	jq -n '{tool_input: {command: "git commit -m \"feat: x\""}}' | sh "$root/hook.sh"
+	# A user hook inside our group, or with linux-toolbox in its path, survives a re-run.
+	jq '.hooks.PreToolUse[1].hooks += [{type: "command", command: "mine"}]
+		| .hooks.PostToolUse += [{matcher: "Write", hooks: [{type: "command", command: "bash ~/linux-toolbox/mine.sh"}]}]' \
+		"$settings" >"$root/settings.json"
+	mv "$root/settings.json" "$settings"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude >/dev/null
+	[[ $(jq -c '[.hooks[][].hooks[].command | select(test("mine"))] | length' "$settings") == 2 ]]
+	[[ $(jq -c '[.hooks[][].hooks[].command | select(test("lint\\.sh|linux-toolbox: commits"))] | length' "$settings") == 2 ]]
 	pass 'AI tools install only the selected agent and skip it when up to date'
 }
 

@@ -68,15 +68,17 @@ purge_packages=(snapd apport multipath-tools kdump-tools)
 if dpkg-query -W -f='${Status}' gnome-software-plugin-snap >/dev/null 2>&1; then
 	purge_packages+=(gnome-software-plugin-snap)
 fi
-# apport and multipath-tools are hard Depends of the ubuntu-server
-# metapackage, so purging them drops it. Keep its other dependencies
+# snapd, apport and multipath-tools are hard Depends of these metapackages,
+# so purging them drops the metapackage. Keep its other dependencies
 # out of reach of a later `apt autoremove`.
-if dpkg-query -W -f='${Status}' ubuntu-server 2>/dev/null | grep -q 'ok installed'; then
-	apt-cache depends --no-recommends --no-suggests ubuntu-server |
-		awk '/^ *Depends:/ && $2 !~ /^</ {print $2}' |
-		xargs -r apt-mark manual >/dev/null
-fi
-apt-get purge -y "${purge_packages[@]}"
+for meta in ubuntu-server ubuntu-server-minimal ubuntu-wsl; do
+	if dpkg-query -W -f='${Status}' "$meta" 2>/dev/null | grep -q 'ok installed'; then
+		apt-cache depends --no-recommends --no-suggests "$meta" |
+			awk '/^ *[|]?Depends:/ && $2 !~ /^</ {print $2}' |
+			xargs -r apt-mark manual >/dev/null
+	fi
+done
+apt-get -o DPkg::Lock::Timeout=300 purge -y "${purge_packages[@]}"
 
 say "Removing leftover snap directories..."
 rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd
