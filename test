@@ -102,6 +102,8 @@ EOF
 	[[ $output == *'Node.js v24.20.0 installed'* ]]
 	[[ $(readlink "$home/.nvm/versions/node/current") == "$home/.nvm/versions/node/v24.20.0" ]]
 	grep -Fqx 'alias default lts/*' "$home/.nvm/calls"
+	# The new version is activated before global packages are copied or installed into it.
+	grep -Fqx 'use v24.20.0' "$home/.nvm/calls"
 	grep -Fqx 'install -g --no-fund --no-audit typescript typescript-language-server' "$home/.nvm/npm-calls"
 
 	mkdir -p "$home/.nvm/alias"

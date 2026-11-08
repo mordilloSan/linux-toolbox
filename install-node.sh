@@ -82,6 +82,8 @@ install_node() (
 	previous=$(readlink "$NVM_DIR/versions/node/current")
 	ln -snf "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
 	previous=${previous##*/}
+	# Work in the new version: nvm refuses to copy packages out of the active one, and npm -g below must land here.
+	nvm use "$current" >/dev/null || return
 	# Global npm packages live inside each version: bring them to the new one. Old versions stay for .nvmrc pins.
 	if [[ $previous == v* && $previous != "$current" ]]; then
 		nvm reinstall-packages "$previous" >/dev/null 2>&1 || notice "Could not copy global npm packages from Node.js $previous"
