@@ -138,7 +138,7 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output path
+	local root="$test_dir/ai" output path begin end claude_md
 	# Hide real agents installed under the developer's home directory.
 	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
 	path="$root/bin:$path"
@@ -188,12 +188,19 @@ EOF
 	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@ponytail --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
-	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 7 ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 7 ]]
+	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
 
 	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log"
-	mkdir -p "$root/home"
+	mkdir -p "$root/home/.claude"
+	begin='<!-- linux-toolbox guidance: managed by install-ai-tools.sh, edits inside are replaced -->'
+	end='<!-- end linux-toolbox guidance -->'
+	claude_md="$root/home/.claude/CLAUDE.md"
+	# Own notes around a rule left loose by an older installer and an outdated managed block.
+	printf '%s\n' '# My notes' \
+		'- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.' \
+		"$begin" '- stale rule' "$end" '# More notes' >"$claude_md"
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude)
 	grep -Fq 'Claude Code 1.2.3 installed' <<<"$output"
@@ -202,12 +209,23 @@ EOF
 	fi
 	[[ $(grep -Fvc -- '--agent claude-code' "$root/npx.log") == 0 ]]
 	[[ ! -e $root/home/.codex ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 7 ]]
+	[[ $(head -n 1 "$claude_md") == '# My notes' && $(tail -n 1 "$claude_md") == '# More notes' ]]
+	[[ $(grep -Fcx -- "$begin" "$claude_md") == 1 && $(grep -Fc 'When spawning a subagent' "$claude_md") == 1 ]]
+	[[ $(wc -l <"$claude_md") == 13 ]]
+	if grep -Fq 'stale rule' "$claude_md"; then
+		return 1
+	fi
+	# A start marker without its end marker leaves the file untouched.
+	mkdir -p "$root/home/.codex"
+	printf '%s\n' "$begin" '- keep me' >"$root/home/.codex/AGENTS.md"
 	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
-		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null 2>&1
 	rm -f "$root/installers.log"
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
-		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude codex)
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude codex 2>&1)
+	grep -Fq 'AGENTS.md has a linux-toolbox start marker but no end marker' <<<"$output"
+	[[ $(<"$root/home/.codex/AGENTS.md") == "$begin"$'\n- keep me' ]]
+	[[ $(wc -l <"$claude_md") == 13 ]]
 	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
 	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
 	if grep -Eq 'Installing or updating (Claude Code|Codex)' <<<"$output"; then

@@ -167,24 +167,52 @@ done
 
 if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	info "Configuring AI agent guidance..."
-	shell_guidance="- For shell-script work, use \`shellcheck <files> && shfmt -d <files>\` for validation; target relevant files instead of reading every script just to check it."
-	json_guidance="- For JSON, especially \`gh api\` output, use \`jq\` or \`gh --jq\` to extract only the fields needed instead of loading raw JSON."
-	search_guidance="- For codebase searches, use \`rg <pattern>\` and \`rg --files\` to narrow the relevant files instead of reading directories or whole files."
-	workflow_guidance="- For GitHub Actions workflows, run \`actionlint\` after changes."
-	read_guidance="- To read code, locate it with \`rg -n\` and read only the relevant line range; don't \`cat\` whole files or several files at once, since everything read stays in context for the rest of the session."
-	subagent_guidance="- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them."
-	commit_guidance="- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (\`type(scope): subject\`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked."
+	# Never change the markers: older blocks are found by them and replaced whole on every run.
+	guidance_begin='<!-- linux-toolbox guidance: managed by install-ai-tools.sh, edits inside are replaced -->'
+	guidance_end='<!-- end linux-toolbox guidance -->'
+	guidance_rules=$(
+		cat <<-'EOF'
+			- For shell-script work, use `shellcheck <files> && shfmt -d <files>` for validation; target relevant files instead of reading every script just to check it.
+			- For JSON, especially `gh api` output, use `jq` or `gh --jq` to extract only the fields needed instead of loading raw JSON.
+			- For codebase searches, use `rg <pattern>` and `rg --files` to narrow the relevant files instead of reading directories or whole files.
+			- For GitHub Actions workflows, run `actionlint` after changes.
+			- To read code, locate it with `rg -n` and read only the relevant line range; don't `cat` whole files or several files at once, since everything read stays in context for the rest of the session.
+			- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.
+			- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
+			- Never read, print, or commit secrets such as `.env` files, tokens, or private keys; refer to them by name.
+			- In repositories with `dev/vX.Y.Z` release branches, releases go through gh-release-flow (`gh release-flow start-dev vX.Y.Z`, `open-pr`, `merge`); never create tags or GitHub Releases by hand, and merge only when asked.
+		EOF
+	)
 	guidance_files=()
 	! selected codex || guidance_files+=("$HOME/.codex/AGENTS.md")
 	! selected claude || guidance_files+=("$HOME/.claude/CLAUDE.md")
 	for file in "${guidance_files[@]}"; do
 		mkdir -p "${file%/*}"
-		if [[ -s $file ]] && ! tail -c 1 "$file" | grep -q '^$'; then
-			printf '\n' >>"$file"
+		touch "$file"
+		# A start marker without its end marker would make the rewrite drop the rest of the file.
+		if grep -Fqx -- "$guidance_begin" "$file" && ! grep -Fqx -- "$guidance_end" "$file"; then
+			printf ' [NOTICE] %s has a linux-toolbox start marker but no end marker; left unchanged.\n' "$file" >&2
+			continue
 		fi
-		for guidance in "$shell_guidance" "$json_guidance" "$search_guidance" "$workflow_guidance" "$read_guidance" "$subagent_guidance" "$commit_guidance"; do
-			grep -Fqxs -- "$guidance" "$file" || printf '%s\n' "$guidance" >>"$file"
-		done
+		# Replace the block in place, or append it; drop loose copies of its rules left by older installers.
+		content=$(GUIDANCE_BEGIN=$guidance_begin GUIDANCE_END=$guidance_end GUIDANCE_RULES=$guidance_rules awk '
+			function block() {
+				print ENVIRON["GUIDANCE_BEGIN"]
+				for (i = 1; i <= n; i++) print rules[i]
+				print ENVIRON["GUIDANCE_END"]
+				done = 1
+			}
+			BEGIN {
+				n = split(ENVIRON["GUIDANCE_RULES"], rules, "\n")
+				for (i = 1; i <= n; i++) managed[rules[i]]
+			}
+			$0 == ENVIRON["GUIDANCE_BEGIN"] { skip = 1; if (!done) block(); next }
+			skip { if ($0 == ENVIRON["GUIDANCE_END"]) skip = 0; next }
+			$0 in managed { next }
+			{ print; last = $0; printed = 1 }
+			END { if (!done) { if (printed && last != "") print ""; block() } }
+		' "$file")
+		printf '%s\n' "$content" >"$file"
 	done
 	ok "AI agent guidance configured"
 fi
