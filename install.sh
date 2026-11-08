@@ -235,10 +235,9 @@ fi
 if selected go; then
 	run_step "Go"
 	load_script install-go.sh | "${as_root[@]}"
-	ok "Go step complete"
 	go_path=$(command -v go || true)
 	# The root step cannot see a Go on the user's PATH.
-	[[ -z $go_path || $(readlink -f "$go_path") == /usr/local/go-versions/* ]] ||
+	[[ -z $go_path || $(readlink -f "$go_path") == /usr/local/go/* ]] ||
 		notice "go on your PATH is $go_path, not /usr/local/bin/go."
 	# Claude Code's gopls-lsp plugin runs gopls; as the user it lands in GOBIN (~/go/bin by default).
 	if output=$(cd "$HOME" && go install golang.org/x/tools/gopls@latest 2>&1 </dev/null); then
@@ -253,7 +252,6 @@ fi
 if selected node; then
 	run_step "Node.js"
 	load_script install-node.sh | bash
-	ok "Node.js step complete"
 	commands+=(node npm npx)
 fi
 

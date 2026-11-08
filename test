@@ -99,9 +99,11 @@ nvm() {
 EOF
 	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 \
 		bash install-node.sh 2>&1)
-	[[ -z $output ]]
+	[[ $output == *'Node.js v24.20.0 installed'* ]]
 	[[ $(readlink "$home/.nvm/versions/node/current") == "$home/.nvm/versions/node/v24.20.0" ]]
 	grep -Fqx 'alias default lts/*' "$home/.nvm/calls"
+	# The new version is activated before global packages are copied or installed into it.
+	grep -Fqx 'use v24.20.0' "$home/.nvm/calls"
 	grep -Fqx 'install -g --no-fund --no-audit typescript typescript-language-server' "$home/.nvm/npm-calls"
 
 	mkdir -p "$home/.nvm/alias"
@@ -185,12 +187,16 @@ test_go_installer() {
 	mkdir -p "$root/bin" "$root/go/bin" "$root/usr/bin" "$root/usr/local/bin" "$root/etc/profile.d"
 	printf '#!/usr/bin/env bash\necho go1.2.3\n' >"$root/go/bin/go"
 	chmod +x "$root/go/bin/go"
+	printf 'go1.2.3\ntime 2026-01-01\n' >"$root/go/VERSION"
 	tar -C "$root" -czf "$root/go.tar.gz" go
 	cat >"$root/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 case $* in
 *VERSION*) printf 'go1.2.3\ntime 2026-01-01\n' ;;
-*/go1.2.3.linux-*) cp "$GO_TARBALL" "${!#}" ;;
+*/go1.2.3.linux-*)
+	echo download >>"$GO_TARBALL.log"
+	cp "$GO_TARBALL" "${!#}"
+	;;
 *) exit 1 ;;
 esac
 EOF
@@ -205,13 +211,27 @@ EOF
 		done
 	done < <(tr ':' '\n' <<<"$PATH")
 	path="$root/bin:$root/tools"
-	# An older version left by an earlier run is removed once the new one is current.
+	# The versioned layout earlier versions used is ours: it moves to /usr/local/go without a question.
 	mkdir -p "$root/usr/local/go-versions/go1.0.0/bin"
-	GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh"
-	[[ $("$root/usr/local/bin/go") == go1.2.3 && ! -e $root/usr/local/go-versions/go1.0.0 ]]
-	# A re-run over its own install is quiet.
+	printf '#!/bin/sh\necho go1.0.0\n' >"$root/usr/local/go-versions/go1.0.0/bin/go"
+	chmod +x "$root/usr/local/go-versions/go1.0.0/bin/go"
+	ln -s "$root/usr/local/go-versions/go1.0.0" "$root/usr/local/go-versions/current"
+	ln -s "$root/usr/local/go-versions/current/bin/go" "$root/usr/local/bin/go"
+	# shellcheck disable=SC2016
+	printf 'export PATH="%s/usr/local/go-versions/current/bin:$HOME/go/bin:$PATH"\n' "$root" >"$root/etc/profile.d/go.sh"
 	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
-	[[ -z $output ]]
+	[[ $output == *'Go 1.2.3 installed'* && $("$root/usr/local/bin/go") == go1.2.3 && ! -e $root/usr/local/go-versions ]]
+	grep -Fq "$root/usr/local/go/bin" "$root/etc/profile.d/go.sh"
+	# A re-run over its own install reports the version and downloads nothing.
+	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
+	[[ $output == *'Go 1.2.3 is already up to date'* && $(wc -l <"$root/go.tar.gz.log") == 1 ]]
+	# Without our profile line, a Go in /usr/local/go was installed by someone else and is kept.
+	cp "$root/etc/profile.d/go.sh" "$root/profile"
+	rm "$root/etc/profile.d/go.sh"
+	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
+	grep -Fq 'Kept the existing Go setup' <<<"$output"
+	[[ ! -e $root/etc/profile.d/go.sh ]]
+	mv "$root/profile" "$root/etc/profile.d/go.sh"
 	# A Go that the user installed is kept when nobody can confirm.
 	printf '#!/bin/sh\n' >"$root/usr/bin/go"
 	chmod +x "$root/usr/bin/go"

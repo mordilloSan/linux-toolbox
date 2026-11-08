@@ -29,6 +29,10 @@ notice() {
 	printf ' \033[90m[\033[33mNOTICE\033[90m]\033[0m %s\n' "$1"
 }
 
+ok() {
+	printf ' \033[90m[\033[38;5;154m  OK  \033[90m]\033[0m %s\n' "$1"
+}
+
 export NVM_DIR=${NVM_DIR:-$HOME/.nvm}
 existing=$(command -v node || true)
 # Only a Node.js with its own npx (the distro nodejs package has none) that the skills CLI can run
@@ -78,9 +82,18 @@ install_node() (
 	previous=$(readlink "$NVM_DIR/versions/node/current")
 	ln -snf "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
 	previous=${previous##*/}
+	# Work in the new version: nvm refuses to copy packages out of the active one, and npm -g below must land here.
+	nvm use "$current" >/dev/null || return
 	# Global npm packages live inside each version: bring them to the new one. Old versions stay for .nvmrc pins.
 	if [[ $previous == v* && $previous != "$current" ]]; then
 		nvm reinstall-packages "$previous" >/dev/null 2>&1 || notice "Could not copy global npm packages from Node.js $previous"
+	fi
+	if [[ $previous == "$current" ]]; then
+		ok "Node.js $current is already up to date"
+	elif [[ $previous == v* ]]; then
+		ok "Node.js updated from $previous to $current"
+	else
+		ok "Node.js $current installed"
 	fi
 	# Claude Code's typescript-lsp plugin runs typescript-language-server, which needs typescript next to it.
 	if ! output=$(npm install -g --no-fund --no-audit typescript typescript-language-server 2>&1); then
