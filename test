@@ -190,8 +190,14 @@ EOF
 	chmod +x "$root/bin/curl"
 	# Run as a regular user with the system paths moved into the test directory.
 	sed -e 's/EUID -ne 0/EUID -lt 0/' -e "s#/usr/#$root/usr/#g" -e "s#/etc/#$root/etc/#g" install-go.sh >"$root/install-go.sh"
-	# Hide every real go on PATH.
-	path="$root/bin:$(tr ':' '\n' <<<"$PATH" | while read -r dir; do [[ -x $dir/go ]] || echo "$dir"; done | paste -sd :)"
+	# Hide every real go on PATH. Link the other commands instead of dropping their directories, since go can share /usr/bin with bash.
+	mkdir -p "$root/tools"
+	while read -r dir; do
+		for file in "$dir"/*; do
+			if [[ -x $file && ${file##*/} != go ]]; then ln -s "$file" "$root/tools/" 2>/dev/null || :; fi
+		done
+	done < <(tr ':' '\n' <<<"$PATH")
+	path="$root/bin:$root/tools"
 	# An older version left by an earlier run is removed once the new one is current.
 	mkdir -p "$root/usr/local/go-versions/go1.0.0/bin"
 	GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh"
