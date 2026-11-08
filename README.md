@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go and latest Node.js LTS through NVM |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap, Ponytail, interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. |
+| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap, Ponytail, interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. Claude Code also gets git safety rules: no `git push` or tags, approval before commits and PR merges, and no Co-Authored-By trailers. |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL-family distributions using `apt`, `dnf`, or `yum`.
@@ -70,7 +70,7 @@ bash install.sh
 
 ## Options
 
-Skip changes to global Codex and Claude instruction files:
+Skip changes to global Codex and Claude instruction files and to Claude Code settings:
 
 ```bash
 LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 bash install.sh

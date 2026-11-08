@@ -138,7 +138,7 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output path begin end claude_md
+	local root="$test_dir/ai" output path begin end claude_md settings status=0
 	# Hide real agents installed under the developer's home directory.
 	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
 	path="$root/bin:$path"
@@ -169,9 +169,11 @@ echo 'hidden skills banner'
 EOF
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/noop"
 	chmod +x "$root/bin/curl" "$root/bin/npx" "$root/bin/noop"
-	for command in actionlint bwrap jq rg shellcheck shfmt; do
+	for command in actionlint bwrap rg shellcheck shfmt; do
 		ln -s noop "$root/bin/$command"
 	done
+	# The installer edits Claude settings with jq, so the test needs the real one.
+	ln -s "$(command -v jq)" "$root/bin/jq"
 
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh)
@@ -190,6 +192,14 @@ EOF
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
+	settings="$root/home/.claude/settings.json"
+	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],1]' ]]
+	# Settings that are not valid JSON are left alone.
+	printf 'not json\n' >"$settings"
+	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude 2>&1)
+	grep -Fq 'settings.json is not valid JSON; git safety rules not added' <<<"$output"
+	[[ $(<"$settings") == 'not json' ]]
 	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
 
 	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log"
@@ -197,6 +207,9 @@ EOF
 	begin='<!-- linux-toolbox guidance: managed by install-ai-tools.sh, edits inside are replaced -->'
 	end='<!-- end linux-toolbox guidance -->'
 	claude_md="$root/home/.claude/CLAUDE.md"
+	settings="$root/home/.claude/settings.json"
+	printf '%s\n' '{"model": "opus", "permissions": {"deny": ["Bash(rm -rf:*)", "Bash(git push:*)"]},' \
+		'"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "true"}]}]}}' >"$settings"
 	# Own notes around a rule left loose by an older installer and an outdated managed block.
 	printf '%s\n' '# My notes' \
 		'- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.' \
@@ -232,6 +245,13 @@ EOF
 		return 1
 	fi
 	[[ ! -e $root/installers.log ]]
+	# Own settings stay, rules are not duplicated, and repeated runs keep a single linux-toolbox hook.
+	[[ $(jq -c '[.model, .permissions.deny, (.hooks.PreToolUse | length)]' "$settings") == '["opus",["Bash(rm -rf:*)","Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],2]' ]]
+	jq -r '.hooks.PreToolUse[1].hooks[0].command' "$settings" >"$root/hook.sh"
+	jq -n '{tool_input: {command: "git commit -m \"feat: x\n\nCo-Authored-By: A <a@b>\""}}' |
+		sh "$root/hook.sh" 2>/dev/null || status=$?
+	[[ $status == 2 ]]
+	jq -n '{tool_input: {command: "git commit -m \"feat: x\""}}' | sh "$root/hook.sh"
 	pass 'AI tools install only the selected agent and skip it when up to date'
 }
 

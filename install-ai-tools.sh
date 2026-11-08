@@ -216,3 +216,30 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	done
 	ok "AI agent guidance configured"
 fi
+
+if selected claude && [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
+	info "Configuring Claude Code git safety rules..."
+	settings="$HOME/.claude/settings.json"
+	# Exit 2 blocks the call; any error of the hook itself falls through to exit 0, so it never blocks by mistake.
+	# shortcut: misses messages read from a file (git commit -F); move to a script hook if that shows up.
+	hook_command=$(
+		cat <<-'EOF'
+			jq -e '.tool_input.command // "" | test("co-authored-by"; "i") and test("\\bcommit\\b")' >/dev/null && { echo 'linux-toolbox: commits carry no Co-Authored-By trailer; remove it and run the command again.' >&2; exit 2; }; exit 0
+		EOF
+	)
+	mkdir -p "${settings%/*}"
+	[[ -s $settings ]] || printf '{}\n' >"$settings"
+	# Adds missing rules without reordering yours, and replaces an older linux-toolbox hook instead of stacking it.
+	if updated=$(jq --arg command "$hook_command" '
+		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
+		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
+		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
+		| .hooks.PreToolUse = [(.hooks.PreToolUse // [])[] | select(any(.hooks[]?; (.command // "") | contains("linux-toolbox:")) | not)]
+			+ [{matcher: "Bash", hooks: [{type: "command", command: $command}]}]
+	' "$settings" 2>/dev/null) && [[ -n $updated ]]; then
+		printf '%s\n' "$updated" >"$settings"
+		ok "Claude Code git safety rules configured"
+	else
+		printf ' [NOTICE] %s is not valid JSON; git safety rules not added.\n' "$settings" >&2
+	fi
+fi
