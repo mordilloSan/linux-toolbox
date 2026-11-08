@@ -1,7 +1,6 @@
 #!/bin/bash
 # =============================================================================
 # Ubuntu cleanup - remove MOTD noise, motd-news, snap, apport, multipath-tools, kdump-tools
-# Standalone host utility; not part of the LinuxIO install or uninstall flow.
 # Idempotent: safe to re-run.
 # Usage: sudo bash ubuntu-cleanup.sh
 # =============================================================================
@@ -27,8 +26,7 @@ say() { echo -e "\e[1;32m==>\e[0m $*"; }
 # ========== 1. MOTD cleanup ==========
 say "Removing Ubuntu MOTD noise scripts..."
 rm -f /etc/update-motd.d/10-help-text \
-	/etc/update-motd.d/50-motd-news \
-	/etc/update-motd.d/50-landscape-sysinfo.wants 2>/dev/null || true
+	/etc/update-motd.d/50-motd-news 2>/dev/null || true
 # dpkg does not restore deleted conffiles on upgrade, so removal is permanent.
 
 say "Disabling and masking motd-news..."
@@ -59,24 +57,35 @@ fi
 say "Stopping snapd services..."
 systemctl disable --now snapd.socket snapd.service snapd.seeded.service 2>/dev/null || true
 
-say "Purging snapd, apport, multipath-tools and kdump-tools..."
+say "Purging snapd, apport, multipath-tools, kdump-tools and landscape-common..."
 export DEBIAN_FRONTEND=noninteractive
 # apport: crash reporter that phones home to Canonical.
 # multipath-tools: SAN-only; elsewhere multipathd just spams the journal.
 # kdump-tools: reserves crashkernel RAM for dumps nobody reads.
-purge_packages=(snapd apport multipath-tools kdump-tools)
-if dpkg-query -W -f='${Status}' gnome-software-plugin-snap >/dev/null 2>&1; then
-	purge_packages+=(gnome-software-plugin-snap)
-fi
-# apport and multipath-tools are hard Depends of the ubuntu-server
-# metapackage, so purging them drops it. Keep its other dependencies
+# landscape-common: the login sysinfo block; its upgrades bring the MOTD link back.
+candidates=(snapd apport multipath-tools kdump-tools gnome-software-plugin-snap)
+# landscape-client (a Landscape-managed host) depends on landscape-common, so keep both there.
+[[ $(dpkg-query -W -f='${db:Status-Status}' landscape-client 2>/dev/null) == installed ]] ||
+	candidates+=(landscape-common)
+# Purge only names dpkg knows: apt refuses the whole command over one unknown name.
+purge_packages=()
+for package in "${candidates[@]}"; do
+	case $(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null) in
+	not-installed | '') ;;
+	*) purge_packages+=("$package") ;;
+	esac
+done
+# snapd, apport and multipath-tools are hard Depends of these metapackages,
+# so purging them drops the metapackage. Keep its other dependencies
 # out of reach of a later `apt autoremove`.
-if dpkg-query -W -f='${Status}' ubuntu-server 2>/dev/null | grep -q 'ok installed'; then
-	apt-cache depends --no-recommends --no-suggests ubuntu-server |
-		awk '/^ *Depends:/ && $2 !~ /^</ {print $2}' |
-		xargs -r apt-mark manual >/dev/null
-fi
-apt-get purge -y "${purge_packages[@]}"
+for meta in ubuntu-server ubuntu-server-minimal ubuntu-wsl; do
+	if dpkg-query -W -f='${Status}' "$meta" 2>/dev/null | grep -q 'ok installed'; then
+		apt-cache depends --no-recommends --no-suggests "$meta" |
+			awk '/^ *[|]?Depends:/ && $2 !~ /^</ {print $2}' |
+			xargs -r apt-mark manual >/dev/null
+	fi
+done
+((${#purge_packages[@]} == 0)) || apt-get -o DPkg::Lock::Timeout=300 purge -y "${purge_packages[@]}"
 
 say "Removing leftover snap directories..."
 rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd
@@ -101,9 +110,9 @@ if command -v cloud-id >/dev/null 2>&1 && [[ $(cloud-id 2>/dev/null) == none ]];
 	say "Disabling cloud-init (no datasource)..."
 	touch /etc/cloud/cloud-init.disabled
 else
-	say "cloud-init has a datasource or is absent, leaving it alone"
+	say "cloud-init is in use, already disabled or not installed; leaving it alone"
 fi
 
-say "Done. MOTD noise removed, motd-news masked, snap, apport, multipath-tools and kdump-tools purged."
+say "Done. MOTD noise removed, motd-news masked, snap, apport, multipath-tools, kdump-tools and landscape-common purged."
 echo "    (To ever restore snap: rm /etc/apt/preferences.d/nosnap.pref && apt install snapd)"
 echo "    (To re-enable cloud-init: rm -f /etc/cloud/cloud-init.disabled)"

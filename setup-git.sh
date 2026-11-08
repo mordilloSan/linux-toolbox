@@ -27,9 +27,10 @@ fi
 if [[ $mode != github ]]; then
 	name=$(git config --global --get user.name || true)
 	email=$(git config --global --get user.email || true)
-	read -r -p "Git name${name:+ [$name]}: " input
+	# Read the terminal, not stdin: when this script is piped into bash, stdin is the script itself.
+	read -r -p "Git name${name:+ [$name]}: " input </dev/tty
 	name=${input:-$name}
-	read -r -p "Git email${email:+ [$email]}: " input
+	read -r -p "Git email${email:+ [$email]}: " input </dev/tty
 	email=${input:-$email}
 	[[ -n $name ]] || {
 		echo 'Enter a Git name.' >&2

@@ -17,6 +17,7 @@ jobs:
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.head.ref, 'dev/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Require successful Check workflow
         env:
@@ -29,15 +30,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
-      - name: Validate tag and scripts
+          persist-credentials: false
+      # The PR's Check run already passed make check and make test; nothing downloaded runs in this job.
+      - name: Validate tag
         env:
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
           printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
-          LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
-          export PATH="$RUNNER_TEMP:$PATH"
-          make check
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}
@@ -50,7 +50,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           release_args=()
           [[ "$RELEASE_TAG" == *-* ]] && release_args+=(--prerelease)
-          gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" --generate-notes "${release_args[@]}"
+          # The release PR body holds the grouped changelog written by gh-release-flow open-pr.
+          if [[ -n $PR_BODY ]]; then release_args+=(--notes "$PR_BODY"); else release_args+=(--generate-notes); fi
+          gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" "${release_args[@]}"
