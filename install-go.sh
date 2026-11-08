@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the current stable Go system-wide using LinuxIO's toolchain flow.
+# Install the current stable Go system-wide.
 # Usage: sudo bash install-go.sh
 set -euo pipefail
 
@@ -23,7 +23,7 @@ notice() {
 	printf ' \033[90m[\033[33mNOTICE\033[90m]\033[0m %s\n' "$1"
 }
 
-version=$(curl -fsSL 'https://go.dev/VERSION?m=text' | sed -n '1s/^go//p')
+version=$(curl -fsSL --speed-limit 1 --speed-time 60 'https://go.dev/VERSION?m=text' | sed -n '1s/^go//p')
 [[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || {
 	echo "Invalid Go version returned by go.dev: $version" >&2
 	exit 1
@@ -48,7 +48,7 @@ profile_line='export PATH="/usr/local/go-versions/current/bin:$HOME/go/bin:$PATH
 conflicts=()
 for existing in /usr/local/bin/go /usr/local/go/bin/go /usr/bin/go "$(command -v go || true)"; do
 	[[ -n $existing && -x $existing ]] || continue
-	[[ $(readlink -f "$existing") == "$versions_dir"/* ]] && continue
+	[[ $(readlink -f "$existing") == "$(readlink -m "$versions_dir")"/* ]] && continue
 	[[ " ${conflicts[*]} " == *" $existing "* ]] && continue
 	conflicts+=("$existing")
 done
@@ -64,7 +64,7 @@ fi
 if [[ ! -x $go_dir/bin/go ]]; then
 	tmp_dir=$(mktemp -d)
 	trap 'rm -rf "$tmp_dir"' EXIT
-	curl -fsSL "https://go.dev/dl/go$version.linux-$goarch.tar.gz" \
+	curl -fsSL --speed-limit 1 --speed-time 60 "https://go.dev/dl/go$version.linux-$goarch.tar.gz" \
 		-o "$tmp_dir/go.tar.gz"
 	tar -C "$tmp_dir" -xzf "$tmp_dir/go.tar.gz"
 	mkdir -p "$versions_dir"
@@ -77,3 +77,5 @@ printf '%s\n' "$profile_line" >/etc/profile.d/go.sh
 chmod 644 /etc/profile.d/go.sh
 ln -sfn "$current/bin/go" /usr/local/bin/go
 ln -sfn "$current/bin/gofmt" /usr/local/bin/gofmt
+# Each update adds a full Go (about 276 MB); keep only the one 'current' points at.
+find "$versions_dir" -mindepth 1 -maxdepth 1 -name 'go*' ! -name "go$version" -exec rm -rf {} +

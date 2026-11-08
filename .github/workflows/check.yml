@@ -28,5 +28,6 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Check syntax and style
         run: make check
+      # A pseudo-terminal whose input never ends: a prompt that ignores non-interactive mode hangs and fails the step.
       - name: Test installer behavior
-        run: make test
+        run: timeout 300 script -qec 'make test' /dev/null < <(sleep 600)

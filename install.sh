@@ -97,12 +97,14 @@ choose_components() {
 	keys=(packages go node shell release claude codex)
 	labels=('System packages: git, gh, make, tar' Go 'Node.js LTS through nvm'
 		'Shell tools: jq, ShellCheck, rg, shfmt' 'GitHub release flow' 'Claude Code' 'Codex CLI')
-	if command -v gh >/dev/null && gh extension list 2>/dev/null | grep -q release-flow; then
+	# 'gh extension list' needs a login; the extension's own help does not.
+	if command -v gh >/dev/null && gh release-flow --help >/dev/null 2>&1 </dev/null; then
 		release=installed
 	fi
+	# GOTOOLCHAIN=local: show the installed Go, not a toolchain that a project in this folder asks for.
 	states=(
 		"$(installed_state git gh make tar)"
-		"$(version_state go env GOVERSION)"
+		"$(GOTOOLCHAIN=local version_state go env GOVERSION)"
 		"$(version_state node --version)"
 		"$(installed_state jq shellcheck shfmt rg actionlint)"
 		"${release:-not installed}"
@@ -165,9 +167,11 @@ pick_components() {
 			;;
 		$'\033')
 			IFS= read -rsn2 -t 0.1 rest <&3 || rest=
+			# Drop the rest of longer keys (F5 is ESC [15~, Shift+Down is ESC [1;2B) so its digits do not toggle items.
+			[[ $rest != '['[0-9] ]] || while IFS= read -rsn1 -t 0.1 key <&3 && [[ $key != [~A-Za-z] ]]; do :; done
 			case $rest in
-			'[A') cursor=$(((cursor + count - 1) % count)) ;;
-			'[B') cursor=$(((cursor + 1) % count)) ;;
+			'[A' | OA) cursor=$(((cursor + count - 1) % count)) ;;
+			'[B' | OB) cursor=$(((cursor + 1) % count)) ;;
 			esac
 			;;
 		esac
@@ -190,7 +194,8 @@ x86_64 | amd64 | aarch64 | arm64) ;;
 esac
 command -v sudo >/dev/null || fail "sudo is required."
 if command -v curl >/dev/null; then
-	fetch=(curl -fsSL)
+	# Give up after a minute with no data instead of hanging.
+	fetch=(curl -fsSL --speed-limit 1 --speed-time 60)
 elif command -v wget >/dev/null; then
 	fetch=(wget -qO-)
 else
@@ -201,7 +206,7 @@ ok "Linux $(uname -m) is supported"
 
 user_path=$PATH
 # Detect tools from earlier runs that are not on the default PATH yet.
-export PATH="$HOME/.nvm/versions/node/current/bin:$HOME/.local/bin:$PATH"
+export PATH="${NVM_DIR:-$HOME/.nvm}/versions/node/current/bin:$HOME/.local/bin:$PATH"
 choose_components
 agents=()
 for agent in claude codex; do
@@ -212,8 +217,12 @@ for component in packages go node shell release; do
 	! selected "$component" || ((++step_total))
 done
 ((${#agents[@]} == 0)) || ((++step_total))
-# sudo resets the environment, so pass the prompt mode on explicitly.
-as_root=(sudo env "LINUX_TOOLBOX_NONINTERACTIVE=${LINUX_TOOLBOX_NONINTERACTIVE:-0}" bash)
+# sudo resets the environment, so pass the prompt mode and any proxy settings on explicitly.
+root_env=("LINUX_TOOLBOX_NONINTERACTIVE=${LINUX_TOOLBOX_NONINTERACTIVE:-0}")
+for var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+	[[ -z ${!var:-} ]] || root_env+=("$var=${!var}")
+done
+as_root=(sudo env "${root_env[@]}" bash)
 commands=()
 
 if selected packages; then
@@ -227,6 +236,10 @@ if selected go; then
 	run_step "Go"
 	load_script install-go.sh | "${as_root[@]}"
 	ok "Go step complete"
+	go_path=$(command -v go || true)
+	# The root step cannot see a Go on the user's PATH.
+	[[ -z $go_path || $(readlink -f "$go_path") == /usr/local/go-versions/* ]] ||
+		notice "go on your PATH is $go_path, not /usr/local/bin/go."
 	commands+=(go)
 fi
 
@@ -257,7 +270,20 @@ if ((${#agents[@]})); then
 		fail "Unable to install AI tools and skills."
 	fi
 	ok "AI tools and skills installed"
-	commands+=("${agents[@]}" bwrap)
+	commands+=("${agents[@]}" bwrap socat)
+fi
+
+# Before the check, so a kept Snap tool that the cleanup removes is reported missing.
+if selected cleanup; then
+	step "Ubuntu cleanup"
+	load_script ubuntu-cleanup.sh | sudo bash
+	ok "Ubuntu cleanup complete"
+	# A gh Snap pointed Git's GitHub sign-in into /snap, which the cleanup just removed.
+	if git config --global --get-regexp '^credential\..*helper$' 2>/dev/null | grep -q '!/snap/' &&
+		command -v gh >/dev/null; then
+		gh auth setup-git --hostname github.com </dev/null ||
+			notice "Run gh auth setup-git to repair Git's GitHub sign-in."
+	fi
 fi
 
 step "Verifying installation"
@@ -281,8 +307,11 @@ fi
 if confirm "$identity_prompt"; then
 	step "Git identity"
 	git_setup=${git_setup:-$(load_script setup-git.sh)}
-	bash -c "$git_setup" -- identity </dev/tty
-	ok "Git identity configured"
+	if bash -c "$git_setup" -- identity </dev/tty; then
+		ok "Git identity configured"
+	else
+		notice "Git identity was not changed"
+	fi
 else
 	notice "Git identity setup skipped"
 fi
@@ -295,16 +324,13 @@ fi
 if confirm "$github_prompt"; then
 	step "GitHub authentication"
 	git_setup=${git_setup:-$(load_script setup-git.sh)}
-	bash -c "$git_setup" -- github </dev/tty
-	ok "GitHub authentication configured"
+	if bash -c "$git_setup" -- github </dev/tty; then
+		ok "GitHub authentication configured"
+	else
+		notice "GitHub authentication was not changed"
+	fi
 else
 	notice "GitHub authentication setup skipped"
-fi
-
-if selected cleanup; then
-	step "Ubuntu cleanup"
-	load_script ubuntu-cleanup.sh | sudo bash
-	ok "Ubuntu cleanup complete"
 fi
 
 # ~/.profile adds ~/.local/bin only when it existed at login, so new terminals would miss these tools.

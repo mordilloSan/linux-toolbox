@@ -4,6 +4,9 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
+# Keep the developer's own settings out of the checks.
+unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME "${!LINUX_TOOLBOX_@}"
+: >"$test_dir/.shellcheckrc"
 
 pass() {
 	printf 'ok - %s\n' "$1"
@@ -21,11 +24,11 @@ curl)
 	[[ ${url##*/} != "${MOCK_CURL_FAIL:-}" ]] || exit 22
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0'
 	;;
-sudo) [[ ${1:-} == -v ]] || exec "$@" ;;
+sudo) [[ ${1:-} == -v ]] || exec env -i PATH="$PATH" "$@" ;;
 esac
 EOF
 	chmod +x "$root/bin/mock"
-	for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap; do
+	for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap socat; do
 		ln -s mock "$root/bin/$command"
 	done
 	printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
@@ -49,13 +52,15 @@ EOF
 	[[ $(tail -n 1 "$root/failed") == install-node.sh ]]
 
 	cp install.sh "$root/local/"
+	# Each stub logs the prompt mode it got; the fake sudo clears the environment like real sudo.
 	while read -r script; do
-		printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q >> %q\n' \
+		# shellcheck disable=SC2016
+		printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" %q "${LINUX_TOOLBOX_NONINTERACTIVE:-unset}" >> %q\n' \
 			"$script" "$root/local.log" >"$root/local/$script"
 	done <"$root/expected"
 	MOCK_CURL_LOG="$root/unexpected-curl" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
-	diff -u "$root/expected" "$root/local.log"
+	diff -u <(sed 's/$/ 1/' "$root/expected") "$root/local.log"
 	[[ ! -e $root/unexpected-curl ]]
 	# shellcheck disable=SC2016
 	path_line='export PATH="$HOME/.local/bin:$PATH"'
@@ -102,19 +107,22 @@ EOF
 		return 1
 	fi
 
-	# A foreign Node.js is kept only when it has its own npx.
+	# A foreign Node.js is kept only when it has its own npx and is 22.20 or newer.
 	mkdir -p "$home/system"
-	printf '#!/usr/bin/env bash\necho v18.19.1\n' >"$home/system/node"
-	chmod +x "$home/system/node"
-	rm "$home/.nvm/calls"
-	HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
-		bash install-node.sh >/dev/null 2>&1
-	grep -Fq 'install --lts' "$home/.nvm/calls"
-	cp "$home/system/node" "$home/system/npx"
-	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
-		bash install-node.sh 2>&1)
-	grep -Fq 'Kept the existing Node.js' <<<"$output"
-	pass 'Node installer selects LTS quietly, keeps a custom nvm default unless confirmed, and replaces a Node.js without npx'
+	for version in v24.0.0:none v18.19.1:npx v24.0.0:npx; do
+		printf '#!/usr/bin/env bash\necho %s\n' "${version%:*}" >"$home/system/node"
+		chmod +x "$home/system/node"
+		rm -f "$home/system/npx" "$home/.nvm/calls"
+		[[ ${version#*:} == none ]] || cp "$home/system/node" "$home/system/npx"
+		output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$home/system:$PATH" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+			bash install-node.sh 2>&1)
+		if [[ $version == v24.0.0:npx ]]; then
+			grep -Fq 'Kept the existing Node.js' <<<"$output"
+		else
+			grep -Fq 'install --lts' "$home/.nvm/calls"
+		fi
+	done
+	pass 'Node installer selects LTS quietly, keeps a custom nvm default unless confirmed, and replaces a Node.js it cannot use'
 }
 
 test_dependency_output() (
@@ -150,8 +158,121 @@ test_dependency_output() (
 	}
 	apt_update
 	[[ $(wc -l <"$log.update") == 3 ]]
-	pass 'system dependencies report each package, hide successful manager output, and wait for the apt lock'
+
+	# Mint finds apt through ID_LIKE, and RHEL installs through dnf.
+	# shellcheck disable=SC2317,SC2329
+	rpm() { :; }
+	# shellcheck disable=SC2317,SC2329
+	dnf() { printf 'dnf %s\n' "$*" >>"$log"; }
+	select_package_manager linuxmint 'ubuntu debian'
+	[[ $PKG_MGR == apt ]]
+	select_package_manager rhel ''
+	[[ $PKG_MGR == dnf ]]
+	pkg_install make >/dev/null
+	[[ $(tail -n 1 "$log") == 'dnf install -y -q --best make' ]]
+	pass 'system dependencies report each package, hide successful manager output, wait for the apt lock, and use dnf on RHEL'
 )
+
+test_go_installer() {
+	local root="$test_dir/go" output path
+	mkdir -p "$root/bin" "$root/go/bin" "$root/usr/bin" "$root/usr/local/bin" "$root/etc/profile.d"
+	printf '#!/usr/bin/env bash\necho go1.2.3\n' >"$root/go/bin/go"
+	chmod +x "$root/go/bin/go"
+	tar -C "$root" -czf "$root/go.tar.gz" go
+	cat >"$root/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+case $* in
+*VERSION*) printf 'go1.2.3\ntime 2026-01-01\n' ;;
+*/go1.2.3.linux-*) cp "$GO_TARBALL" "${!#}" ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$root/bin/curl"
+	# Run as a regular user with the system paths moved into the test directory.
+	sed -e 's/EUID -ne 0/EUID -lt 0/' -e "s#/usr/#$root/usr/#g" -e "s#/etc/#$root/etc/#g" install-go.sh >"$root/install-go.sh"
+	# Hide every real go on PATH.
+	path="$root/bin:$(tr ':' '\n' <<<"$PATH" | while read -r dir; do [[ -x $dir/go ]] || echo "$dir"; done | paste -sd :)"
+	# An older version left by an earlier run is removed once the new one is current.
+	mkdir -p "$root/usr/local/go-versions/go1.0.0/bin"
+	GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh"
+	[[ $("$root/usr/local/bin/go") == go1.2.3 && ! -e $root/usr/local/go-versions/go1.0.0 ]]
+	# A re-run over its own install is quiet.
+	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
+	[[ -z $output ]]
+	# A Go that the user installed is kept when nobody can confirm.
+	printf '#!/bin/sh\n' >"$root/usr/bin/go"
+	chmod +x "$root/usr/bin/go"
+	rm "$root/usr/local/bin/go"
+	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
+	grep -Fq 'Kept the existing Go setup' <<<"$output"
+	[[ ! -e $root/usr/local/bin/go ]]
+	pass 'Go installer links the latest Go and keeps a Go the user installed'
+}
+
+test_shell_tools() {
+	local root="$test_dir/shell-tools" command status
+	mkdir -p "$root/bin" "$root/assets/sc/shellcheck-v1" "$root/assets/rg/ripgrep-1" "$root/assets/al"
+	# Only the commands the script needs, so tools already on this machine are not found.
+	for command in awk bash cat chmod gzip install mkdir mktemp rm sha256sum tar; do
+		ln -s "$(command -v "$command")" "$root/bin/$command"
+	done
+	printf '#!/usr/bin/env bash\necho x86_64\n' >"$root/bin/uname"
+	cp "$(command -v jq)" "$root/assets/jq-linux-amd64"
+	for command in sc/shellcheck-v1/shellcheck rg/ripgrep-1/rg al/actionlint shfmt_v1_linux_amd64; do
+		printf '#!/bin/sh\necho %s\n' "${command##*/}" >"$root/assets/$command"
+	done
+	tar -czf "$root/assets/shellcheck-v1.linux.x86_64.tar.gz" -C "$root/assets/sc" shellcheck-v1
+	tar -czf "$root/assets/ripgrep-1-x86_64-unknown-linux-musl.tar.gz" -C "$root/assets/rg" ripgrep-1
+	tar -czf "$root/assets/actionlint_1_linux_amd64.tar.gz" -C "$root/assets/al" actionlint
+	# Serves the assets above; MOCK_TAMPER names an asset whose bytes no longer match its checksum.
+	cat >"$root/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+out=/dev/stdout
+while (($#)); do
+	case $1 in
+	-o) out=$2 && shift ;;
+	-*) ;;
+	*) url=$1 ;;
+	esac
+	shift
+done
+case $url in
+*/sha256sum.txt) sha256sum "$MOCK_ASSETS/jq-linux-amd64" | awk '{ print $1 "  jq-linux-amd64" }' ;;
+https://api.github.com/repos/*)
+	case $url in
+	*/shellcheck/*) asset=shellcheck-v1.linux.x86_64.tar.gz ;;
+	*/ripgrep/*) asset=ripgrep-1-x86_64-unknown-linux-musl.tar.gz ;;
+	*/sh/*) asset=shfmt_v1_linux_amd64 ;;
+	*/actionlint/*) asset=actionlint_1_linux_amd64.tar.gz ;;
+	esac
+	digest=$(sha256sum "$MOCK_ASSETS/$asset")
+	printf '{"assets": [{"name": "%s", "browser_download_url": "https://assets.test/%s", "digest": "sha256:%s"}]}\n' \
+		"$asset" "$asset" "${digest%% *}"
+	;;
+*/jq-linux-amd64 | https://assets.test/*)
+	cat "$MOCK_ASSETS/${url##*/}" >"$out"
+	[[ ${url##*/} != "${MOCK_TAMPER:-}" ]] || echo tampered >>"$out"
+	;;
+*) exit 22 ;;
+esac
+EOF
+	chmod +x "$root/bin/curl" "$root/bin/uname"
+	MOCK_ASSETS="$root/assets" LINUX_TOOLBOX_BIN_DIR="$root/out" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		PATH="$root/bin" HOME="$root/home" bash install-shell-tools.sh >/dev/null
+	for command in jq shellcheck rg shfmt actionlint; do
+		[[ -x $root/out/$command ]]
+	done
+	[[ $("$root/out/shfmt") == shfmt_v1_linux_amd64 ]]
+	# A download that does not match its checksum stops the script and installs nothing.
+	for command in jq-linux-amd64 shfmt_v1_linux_amd64; do
+		status=0
+		MOCK_ASSETS="$root/assets" MOCK_TAMPER=$command LINUX_TOOLBOX_BIN_DIR="$root/bad" \
+			LINUX_TOOLBOX_NONINTERACTIVE=1 PATH="$root/bin" HOME="$root/home" \
+			bash install-shell-tools.sh >/dev/null 2>&1 || status=$?
+		[[ $status != 0 && ! -e $root/bad/${command%%[-_]*} ]]
+	done
+	pass 'shell tools install from GitHub releases and reject a download that fails its checksum'
+}
 
 test_ubuntu_cleanup() {
 	local root="$test_dir/cleanup" fs command
@@ -166,8 +287,11 @@ printf '%s %s\n' "${0##*/}" "$*" >>"$CLEANUP_LOG"
 case ${0##*/} in
 snap) [[ $1 != list ]] || printf '%s\n' Name core lxd snapd | grep -vxFf <(sed -n 's/^snap remove --purge //p' "$CLEANUP_LOG") ;;
 dpkg-query)
-	[[ ${!#} == ubuntu-wsl ]] || exit 1
-	echo 'install ok installed'
+	case ${!#} in
+	ubuntu-wsl) echo 'install ok installed' ;;
+	snapd | apport | multipath-tools | kdump-tools | landscape-common) echo installed ;;
+	*) exit 1 ;;
+	esac
 	;;
 apt-cache) printf '%s\n' ubuntu-wsl '  Depends: curl' ' |Depends: vim' '  Depends: nano' '  Depends: <editor>' '  Recommends: lsof' ;;
 cloud-id) echo none ;;
@@ -190,7 +314,8 @@ EOF
 	[[ -e $fs/etc/update-motd.d/00-header && ! -e $fs/etc/update-motd.d/50-motd-news ]]
 	[[ $(grep -c '^snap remove' "$root/log") == 3 && $(grep '^snap remove' "$root/log" | tail -n 1) == 'snap remove --purge snapd' ]]
 	grep -Fqx 'apt-mark manual curl vim nano' "$root/log"
-	grep -Fqx 'apt-get -o DPkg::Lock::Timeout=300 purge -y snapd apport multipath-tools kdump-tools' "$root/log"
+	# Names dpkg does not know (gnome-software-plugin-snap here) are left out instead of failing the purge.
+	grep -Fqx 'apt-get -o DPkg::Lock::Timeout=300 purge -y snapd apport multipath-tools kdump-tools landscape-common' "$root/log"
 	[[ -e $fs/etc/apt/preferences.d/nosnap.pref && -e $fs/etc/cloud/cloud-init.disabled ]]
 	pass 'Ubuntu cleanup removes only snap folders, guards WSL packages, and pins snapd away'
 }
@@ -204,6 +329,8 @@ printf '%s\n' "$*" >>"$GH_LOG"
 echo 'hidden gh output'
 EOF
 	chmod +x "$root/bin/gh"
+	# zsh users with a .zshrc get the same line there.
+	: >"$root/home/.zshrc"
 	first=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" bash install-release-flow.sh)
 	second=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" bash install-release-flow.sh)
 	grep -Fq 'Run source ~/.bashrc' <<<"$first"
@@ -213,7 +340,7 @@ EOF
 	fi
 	# shellcheck disable=SC2016
 	profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
-	[[ $(grep -Fxc -- "$profile" "$root/home/.bashrc") == 1 ]]
+	[[ $(grep -Fxc -- "$profile" "$root/home/.bashrc") == 1 && $(grep -Fxc -- "$profile" "$root/home/.zshrc") == 1 ]]
 	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
 		--no-print-directory --dry-run start-dev | grep -Fqx 'gh release-flow "start-dev"'
 	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
@@ -233,6 +360,10 @@ EOF
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash install-release-flow.sh)
 	grep -Fq 'Kept the existing' <<<"$output"
 	[[ $(<"$root/home/.config/make/release-flow.mk") == custom: ]]
+	# make cannot load files from a home with a space, so the targets are skipped with a notice.
+	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
+	grep -Fq 'skipped the Make targets' <<<"$output"
+	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
 	pass 'release-flow Make targets work, notice once, and keep a custom Make file'
 }
 
@@ -268,7 +399,7 @@ echo 'hidden skills banner'
 EOF
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/noop"
 	chmod +x "$root/bin/curl" "$root/bin/npx" "$root/bin/noop"
-	for command in actionlint bwrap rg shellcheck shfmt; do
+	for command in actionlint bwrap rg shellcheck shfmt socat; do
 		ln -s noop "$root/bin/$command"
 	done
 	# The installer edits Claude settings with jq, so the test needs the real one.
@@ -276,7 +407,7 @@ EOF
 
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh)
-	for tool in bubblewrap 'Claude Code 1.2.3' 'Codex 1.2.3' Ponytail; do
+	for tool in 'bubblewrap and socat' 'Claude Code 1.2.3' 'Codex 1.2.3' Ponytail; do
 		grep -Fq "$tool installed" <<<"$output"
 	done
 	if grep -Eq 'hidden|Marketplace|████|Tip:' <<<"$output"; then
@@ -287,14 +418,15 @@ EOF
 	[[ $(grep -Fv context-handoff "$root/npx.log" | grep -Fvc -- '--agent codex claude-code') == 0 ]]
 	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
 	# Every skill source is pinned to a commit.
-	[[ $(grep -Evc -- '^--yes skills add [^ ]+#[0-9a-f]{40} ' "$root/npx.log") == 0 ]]
-	[[ $(grep -Fvc -- '--yes' "$root/npx.log") == 0 ]]
+	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
 	grep -Fq 'claude plugin install ponytail@linux-toolbox --yes' "$root/agents.log"
 	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	settings="$root/home/.claude/settings.json"
-	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],1,1]' ]]
+	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],0,1]' ]]
+	# Claude Code's own setting keeps Co-Authored-By out of commits.
+	[[ $(jq -c '.attribution' "$settings") == '{"commit":""}' ]]
 	# The lint hook reports shell findings with exit 2 and stays quiet for clean or unrelated files.
 	hook="$root/home/.claude/hooks/linux-toolbox-lint.sh"
 	shellcheck "$hook"
@@ -309,6 +441,18 @@ EOF
 	for file in good.sh notes.txt; do
 		jq -n --arg f "$root/$file" '{tool_input: {file_path: $f}}' | bash "$hook"
 	done
+	# Workflows go to actionlint: exit 1 means findings; its own errors stay quiet.
+	mkdir -p "$root/repo/.github/workflows" "$root/lint-bin"
+	: >"$root/repo/.github/workflows/ci.yml"
+	# shellcheck disable=SC2016
+	printf '#!/bin/sh\necho "ci.yml:1:1: finding"\nexit "$ACTIONLINT_STATUS"\n' >"$root/lint-bin/actionlint"
+	chmod +x "$root/lint-bin/actionlint"
+	status=0
+	jq -n --arg f "$root/repo/.github/workflows/ci.yml" '{tool_input: {file_path: $f}}' |
+		ACTIONLINT_STATUS=1 PATH="$root/lint-bin:$PATH" bash "$hook" 2>/dev/null || status=$?
+	[[ $status == 2 ]]
+	jq -n --arg f "$root/repo/.github/workflows/ci.yml" '{tool_input: {file_path: $f}}' |
+		ACTIONLINT_STATUS=3 PATH="$root/lint-bin:$PATH" bash "$hook"
 	# Settings that are not valid JSON are left alone.
 	printf 'not json\n' >"$settings"
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
@@ -353,6 +497,20 @@ EOF
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude codex 2>&1)
 	grep -Fq 'AGENTS.md has a linux-toolbox start marker but no end marker' <<<"$output"
 	[[ $(<"$root/home/.codex/AGENTS.md") == "$begin"$'\n- keep me' ]]
+	# A start marker after the last end marker is unclosed too.
+	printf '%s\n' "$begin" "$end" "$begin" '- keep me too' >"$root/home/.codex/AGENTS.md"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null 2>&1
+	grep -Fqx -- '- keep me too' "$root/home/.codex/AGENTS.md"
+	# A file with Windows line endings keeps a single block and the user's notes, and is saved with LF.
+	printf '%s\r\n' '# my notes' "$begin" '- old rule' "$end" >"$root/home/.codex/AGENTS.md"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh codex >/dev/null 2>&1
+	[[ $(grep -Fcx -- "$begin" "$root/home/.codex/AGENTS.md") == 1 && $(head -n 1 "$root/home/.codex/AGENTS.md") == '# my notes' ]]
+	if grep -q $'\r' "$root/home/.codex/AGENTS.md"; then
+		return 1
+	fi
+	printf '%s\n' "$begin" '- keep me' >"$root/home/.codex/AGENTS.md"
 	[[ $(wc -l <"$claude_md") == 13 ]]
 	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
 	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
@@ -361,22 +519,23 @@ EOF
 	fi
 	[[ ! -e $root/installers.log ]]
 	# Own settings stay, rules are not duplicated, and repeated runs keep a single linux-toolbox hook.
-	[[ $(jq -c '[.model, .permissions.deny, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '["opus",["Bash(rm -rf:*)","Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],2,1]' ]]
-	jq -r '.hooks.PreToolUse[1].hooks[0].command' "$settings" >"$root/hook.sh"
-	status=0
-	jq -n '{tool_input: {command: "git commit -m \"feat: x\n\nCo-Authored-By: A <a@b>\""}}' |
-		sh "$root/hook.sh" 2>/dev/null || status=$?
-	[[ $status == 2 ]]
-	jq -n '{tool_input: {command: "git commit -m \"feat: x\""}}' | sh "$root/hook.sh"
-	# A user hook inside our group, or with linux-toolbox in its path, survives a re-run.
-	jq '.hooks.PreToolUse[1].hooks += [{type: "command", command: "mine"}]
-		| .hooks.PostToolUse += [{matcher: "Write", hooks: [{type: "command", command: "bash ~/linux-toolbox/mine.sh"}]}]' \
+	[[ $(jq -c '[.model, .permissions.deny, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '["opus",["Bash(rm -rf:*)","Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],1,1]' ]]
+	# A user hook inside our group, or with linux-toolbox in its path, survives a re-run;
+	# the commit guard older versions installed is removed.
+	jq '.hooks.PostToolUse[0].hooks += [{type: "command", command: "mine"}]
+		| .hooks.PostToolUse += [{matcher: "Write", hooks: [{type: "command", command: "bash ~/linux-toolbox/mine.sh"}]}]
+		| .hooks.PreToolUse += [{matcher: "Bash", hooks: [{type: "command", command: "echo linux-toolbox: commits carry no trailer; exit 2"}]}]' \
 		"$settings" >"$root/settings.json"
 	mv "$root/settings.json" "$settings"
 	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude >/dev/null
 	[[ $(jq -c '[.hooks[][].hooks[].command | select(test("mine"))] | length' "$settings") == 2 ]]
-	[[ $(jq -c '[.hooks[][].hooks[].command | select(test("lint\\.sh|linux-toolbox: commits"))] | length' "$settings") == 2 ]]
+	[[ $(jq -c '[.hooks[][].hooks[].command | select(test("lint\\.sh|linux-toolbox: commits"))] | length' "$settings") == 1 ]]
+	# The documented opt-out leaves every agent file alone.
+	rm -rf "${root:?}/home"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh >/dev/null
+	[[ ! -e $root/home/.claude && ! -e $root/home/.codex ]]
 	pass 'AI tools install only the selected agent and skip it when up to date'
 }
 
@@ -397,8 +556,9 @@ exit 0
 EOF
 	printf '#!/usr/bin/env bash\n' >"$root/bin/explorer.exe"
 	chmod +x "$root/bin/git" "$root/bin/gh" "$root/bin/explorer.exe"
-	printf 'Test User\ntest@example.com\n' | SETUP_LOG="$root/identity.log" \
-		PATH="$root/bin:$PATH" HOME="$root/home" bash setup-git.sh identity >/dev/null
+	# The prompts read the terminal, not stdin (as when piped): answers go through a pseudo-terminal.
+	printf 'Test User\ntest@example.com\n' | SETUP_LOG="$root/identity.log" PATH="$root/bin:$PATH" HOME="$root/home" \
+		timeout 20 script -qfec 'bash setup-git.sh identity </dev/null' /dev/null >/dev/null
 	grep -Fqx 'git config --global user.name Test User' "$root/identity.log"
 	grep -Fqx 'git config --global user.email test@example.com' "$root/identity.log"
 	SETUP_LOG="$root/github.log" PATH="$root/bin:$PATH" HOME="$root/home" WSL_INTEROP=1 \
@@ -414,6 +574,8 @@ EOF
 test_installer_orchestration
 test_node_installer
 test_dependency_output
+test_go_installer
+test_shell_tools
 test_ubuntu_cleanup
 test_release_flow
 test_ai_tools

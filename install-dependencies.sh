@@ -6,7 +6,6 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
-trap 'echo -e "\e[0m"; exit 1' INT
 
 # ---------- Colors & Styling ----------
 readonly COLOUR_RESET='\e[0m'
@@ -54,9 +53,6 @@ select_package_manager() {
 	elif command -v dnf >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1 &&
 		[[ "$family" == *" fedora "* || "$family" == *" rhel "* ]]; then
 		PKG_MGR=dnf
-	elif command -v yum >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1 &&
-		[[ "$family" == *" fedora "* || "$family" == *" rhel "* ]]; then
-		PKG_MGR=yum
 	fi
 }
 
@@ -78,11 +74,9 @@ detect_distro() {
 # Check if a package is already installed
 pkg_installed() {
 	if [[ "$PKG_MGR" == apt ]]; then
-		[[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null || true)" == "install ok installed" ]]
-	elif [[ "$PKG_MGR" == dnf || "$PKG_MGR" == yum ]]; then
-		rpm -q "$1" &>/dev/null
+		[[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" == "install ok installed" ]]
 	else
-		return 1
+		rpm -q "$1" &>/dev/null
 	fi
 }
 
@@ -94,7 +88,8 @@ pkg_install() {
 		if [[ "$PKG_MGR" == apt ]]; then
 			installer=(apt-get -o DPkg::Lock::Timeout=300 install -y -qq "$package")
 		else
-			installer=("$PKG_MGR" install -y -q "$package")
+			# --best: Fedora's dnf otherwise skips upgrades of packages that are already installed.
+			installer=("$PKG_MGR" install -y -q --best "$package")
 		fi
 		if ! output=$("${installer[@]}" 2>&1); then
 			printf '%s\n' "$output" >&2
@@ -125,7 +120,8 @@ install_packages() {
 	fi
 
 	local packages=(git gh make tar gzip)
-	[[ "$PKG_MGR" == apt ]] && packages+=(xz-utils) || packages+=(xz)
+	# Node.js 25 and newer need libatomic.
+	[[ "$PKG_MGR" == apt ]] && packages+=(xz-utils libatomic1) || packages+=(xz libatomic)
 	if ! command -v awk >/dev/null 2>&1; then
 		[[ "$PKG_MGR" == apt ]] && packages+=(mawk) || packages+=(gawk)
 	fi
@@ -156,7 +152,7 @@ install_packages() {
 			Show 3 "Kept the existing GitHub CLI repository"
 		else
 			install -d -m 755 /etc/apt/keyrings /etc/apt/sources.list.d
-			curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+			curl -fsSL --speed-limit 1 --speed-time 60 https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 				-o /etc/apt/keyrings/githubcli-archive-keyring.gpg
 			chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
 			printf '%s\n' "$source_line" >"$source_file"
@@ -164,7 +160,7 @@ install_packages() {
 		apt_update
 	else
 		local repo_file=/etc/yum.repos.d/gh-cli.repo repo
-		repo=$(curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo)
+		repo=$(curl -fsSL --speed-limit 1 --speed-time 60 https://cli.github.com/packages/rpm/gh-cli.repo)
 		if [[ -e $repo_file && $(<"$repo_file") != "$repo" ]] &&
 			! confirm "$repo_file has different content. Replace it with the official GitHub CLI repository?"; then
 			Show 3 "Kept the existing GitHub CLI repository"
@@ -179,16 +175,8 @@ install_packages() {
 }
 
 # ---------- Main ----------
-require_root() {
-	if [[ $EUID -ne 0 ]]; then
-		Show 1 "This script must be run as root"
-	fi
-}
-
 main() {
-
-	require_root
-
+	[[ $EUID -eq 0 ]] || Show 1 "This script must be run as root"
 	detect_distro
 	Show 2 "Detected distribution: ${BOLD}${DISTRO}${COLOUR_RESET}"
 

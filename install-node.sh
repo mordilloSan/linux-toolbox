@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the latest Node.js LTS using LinuxIO's user-local nvm flow.
+# Install the latest Node.js LTS with a user-local nvm.
 set -euo pipefail
 
 if [[ $EUID -eq 0 ]]; then
@@ -31,8 +31,10 @@ notice() {
 
 export NVM_DIR=${NVM_DIR:-$HOME/.nvm}
 existing=$(command -v node || true)
-# A Node.js without its own npx (the distro nodejs package) cannot run the later steps, so it is not kept.
-if [[ -n $existing && $(readlink -f "$existing") != "$NVM_DIR"/* && -x ${existing%/*}/npx ]] &&
+# Only a Node.js with its own npx (the distro nodejs package has none) that the skills CLI can run
+# (22.20 or newer; raise it when the skills pin moves) is offered to keep.
+if [[ -n $existing && $(readlink -f "$existing") != "$(readlink -m "$NVM_DIR")"/* && -x ${existing%/*}/npx ]] &&
+	[[ $(printf '%s\n' v22.20.0 "$("$existing" --version 2>/dev/null)" | sort -V | head -n 1) == v22.20.0 ]] &&
 	! confirm "Node.js $("$existing" --version 2>/dev/null) found at $existing. Install Node.js LTS with nvm? nvm's copy comes first in new shells."; then
 	notice "Kept the existing Node.js"
 	exit 0
@@ -43,8 +45,13 @@ if [[ -s $NVM_DIR/alias/default && $(<"$NVM_DIR/alias/default") != 'lts/*' ]] &&
 	notice "Kept the nvm default $(<"$NVM_DIR/alias/default")"
 	set_default=
 fi
+# nvm refuses to run when ~/.npmrc sets prefix or globalconfig.
+if grep -Eqs '^[[:space:]]*(prefix|globalconfig)[[:space:]]*=' "$HOME/.npmrc"; then
+	echo "$HOME/.npmrc sets prefix or globalconfig, which nvm cannot use. Remove that line, then run the installer again." >&2
+	exit 1
+fi
 if [[ ! -s $NVM_DIR/nvm.sh ]]; then
-	nvm_version=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://latest.nvm.sh)
+	nvm_version=$(curl -fsSL --speed-limit 1 --speed-time 60 -o /dev/null -w '%{url_effective}' https://latest.nvm.sh)
 	nvm_version=${nvm_version##*/}
 	[[ $nvm_version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
 		echo "Invalid nvm version: $nvm_version" >&2
@@ -52,27 +59,29 @@ if [[ ! -s $NVM_DIR/nvm.sh ]]; then
 	}
 	# nvm's installer rejects a missing NVM_DIR unless it is nvm's own default, which XDG_CONFIG_HOME changes.
 	mkdir -p "$NVM_DIR"
-	curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
+	curl -fsSL --speed-limit 1 --speed-time 60 "https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_version/install.sh" |
 		METHOD=script bash >/dev/null
 fi
 
 install_node() (
 	# nvm is not compatible with errexit.
 	set +e
-	set -uo pipefail
 	# shellcheck source=/dev/null
 	. "$NVM_DIR/nvm.sh" || return
-	local log current
-	log=$(mktemp)
-	trap 'rm -f "$log"' EXIT
-	if ! nvm install --lts --no-progress >"$log" 2>&1; then
-		cat "$log" >&2
+	local output current previous
+	if ! output=$(nvm install --lts --no-progress 2>&1); then
+		printf '%s\n' "$output" >&2
 		return 1
 	fi
 	[[ -z $set_default ]] || nvm alias default 'lts/*' >/dev/null || return
 	current=$(nvm version 'lts/*') || return
-	mkdir -p "$NVM_DIR/versions/node" || return
+	previous=$(readlink "$NVM_DIR/versions/node/current")
 	ln -snf "$NVM_DIR/versions/node/$current" "$NVM_DIR/versions/node/current"
+	previous=${previous##*/}
+	# Global npm packages live inside each version: bring them to the new one. Old versions stay for .nvmrc pins.
+	if [[ $previous == v* && $previous != "$current" ]]; then
+		nvm reinstall-packages "$previous" >/dev/null 2>&1 || notice "Could not copy global npm packages from Node.js $previous"
+	fi
 )
 
 install_node

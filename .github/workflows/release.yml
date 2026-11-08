@@ -31,15 +31,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           persist-credentials: false
-      - name: Validate tag and scripts
+      # The PR's Check run already passed make check and make test; nothing downloaded runs in this job.
+      - name: Validate tag
         env:
           RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           [[ "$RELEASE_BRANCH" =~ ^dev/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
           printf 'RELEASE_TAG=%s\n' "${RELEASE_BRANCH#dev/}" >> "$GITHUB_ENV"
-          LINUX_TOOLBOX_BIN_DIR="$RUNNER_TEMP" bash install-shell-tools.sh
-          export PATH="$RUNNER_TEMP:$PATH"
-          make check
       - name: Prepare pinned installer
         env:
           REPOSITORY: ${{ github.repository }}
