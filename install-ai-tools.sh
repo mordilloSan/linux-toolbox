@@ -300,6 +300,7 @@ exit 2
 EOF
 	[[ -s $settings ]] || printf '{}\n' >"$settings"
 	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
+	# autoUpdate turns on background updates for this repository's plugin marketplace (third-party ones default to off); an explicit false stays.
 	# attribution.commit "" stops Claude Code adding Co-Authored-By; the removal keeps dropping the older guard hook.
 	# jq reads the file from a pipe, which a sandboxed Snap jq can do even though it cannot open home files.
 	if updated=$(jq --arg lint "bash $(printf %q "$lint_hook")" '
@@ -308,6 +309,7 @@ EOF
 		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
 		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
 		| if .attribution == false then . else .attribution.commit //= "" | if .includeCoAuthoredBy == false then .attribution.pr //= "" else . end end
+		| if (.extraKnownMarketplaces["linux-toolbox"] | type == "object" and .autoUpdate == null) then .extraKnownMarketplaces["linux-toolbox"].autoUpdate = true else . end
 		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours)
 		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
 	' < <(cat -- "$settings") 2>/dev/null) && [[ -n $updated ]]; then
