@@ -139,24 +139,6 @@ if selected codex; then
 	skill_agents=(codex "${skill_agents[@]}")
 fi
 
-info "Installing or updating Ponytail..."
-if selected claude; then
-	# Ponytail comes from this repository's marketplace, pinned to the commit in .claude-plugin/marketplace.json.
-	# Claude Code updates it only when its plugin.json "version" changes: move that sha only to a commit with a new version.
-	claude plugin marketplace update linux-toolbox >/dev/null 2>&1 ||
-		run_quiet claude plugin marketplace add https://github.com/mordilloSan/linux-toolbox.git
-	run_quiet claude plugin install ponytail@linux-toolbox --yes
-	run_quiet claude plugin update ponytail@linux-toolbox
-	# Drop the unpinned copy older versions installed, only once the pinned one is in place.
-	claude plugin uninstall ponytail@ponytail >/dev/null 2>&1 || true
-	claude plugin marketplace remove ponytail --scope user >/dev/null 2>&1 || true
-fi
-if selected codex; then
-	run_quiet codex plugin marketplace add DietrichGebert/ponytail
-	run_quiet codex plugin add ponytail@ponytail
-fi
-ok "Ponytail installed"
-
 if selected claude; then
 	info "Installing the Go and TypeScript language server plugins..."
 	# Anthropic's official marketplace; Claude Code normally has it already.
@@ -300,7 +282,6 @@ exit 2
 EOF
 	[[ -s $settings ]] || printf '{}\n' >"$settings"
 	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
-	# autoUpdate turns on background updates for this repository's plugin marketplace (third-party ones default to off); an explicit false stays.
 	# attribution.commit "" stops Claude Code adding Co-Authored-By; the removal keeps dropping the older guard hook.
 	# jq reads the file from a pipe, which a sandboxed Snap jq can do even though it cannot open home files.
 	if updated=$(jq --arg lint "bash $(printf %q "$lint_hook")" '
@@ -309,7 +290,6 @@ EOF
 		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
 		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
 		| if .attribution == false then . else .attribution.commit //= "" | if .includeCoAuthoredBy == false then .attribution.pr //= "" else . end end
-		| if (.extraKnownMarketplaces["linux-toolbox"] | type == "object" and .autoUpdate == null) then .extraKnownMarketplaces["linux-toolbox"].autoUpdate = true else . end
 		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours)
 		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
 	' < <(cat -- "$settings") 2>/dev/null) && [[ -n $updated ]]; then

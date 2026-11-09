@@ -455,7 +455,7 @@ EOF
 
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh)
-	for tool in 'bubblewrap and socat' 'Claude Code 1.2.3' 'Codex 1.2.3' Ponytail; do
+	for tool in 'bubblewrap and socat' 'Claude Code 1.2.3' 'Codex 1.2.3'; do
 		grep -Fq "$tool installed" <<<"$output"
 	done
 	if grep -Eq 'hidden|Marketplace|████|Tip:' <<<"$output"; then
@@ -467,10 +467,8 @@ EOF
 	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
 	# Every skill source is pinned to a commit.
 	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
-	grep -Fq 'claude plugin install ponytail@linux-toolbox --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
-	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	settings="$root/home/.claude/settings.json"
