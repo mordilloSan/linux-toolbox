@@ -93,7 +93,8 @@ nvm() {
 	case $1 in
 	install) echo 'hidden nvm output' ;;
 	alias) ;;
-	version) echo 'v24.20.0' ;;
+	version) [[ $2 == default ]] && cat "$NVM_DIR/default-version" || echo 'v24.20.0' ;;
+	version-remote) echo 'v24.20.0' ;;
 	esac
 }
 EOF
@@ -108,6 +109,7 @@ EOF
 
 	mkdir -p "$home/.nvm/alias"
 	echo 22 >"$home/.nvm/alias/default"
+	echo v22.1.0 >"$home/.nvm/default-version"
 	rm "$home/.nvm/calls"
 	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 \
 		bash install-node.sh 2>&1)
@@ -115,6 +117,19 @@ EOF
 	if grep -Fq 'alias default' "$home/.nvm/calls"; then
 		return 1
 	fi
+
+	# A default already on the latest LTS line is left alone without asking.
+	echo 24 >"$home/.nvm/alias/default"
+	echo v24.1.0 >"$home/.nvm/default-version"
+	rm "$home/.nvm/calls"
+	output=$(HOME="$home" NVM_DIR="$home/.nvm" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 \
+		bash install-node.sh 2>&1)
+	[[ $output != *'Kept the nvm default'* ]]
+	if grep -Fq 'alias default' "$home/.nvm/calls"; then
+		return 1
+	fi
+	echo 22 >"$home/.nvm/alias/default"
+	echo v22.1.0 >"$home/.nvm/default-version"
 
 	# A foreign Node.js is kept only when it has its own npx and is 22.20 or newer.
 	mkdir -p "$home/system"
@@ -440,7 +455,7 @@ EOF
 
 	output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh)
-	for tool in 'bubblewrap and socat' 'Claude Code 1.2.3' 'Codex 1.2.3' Ponytail; do
+	for tool in 'bubblewrap and socat' 'Claude Code 1.2.3' 'Codex 1.2.3'; do
 		grep -Fq "$tool installed" <<<"$output"
 	done
 	if grep -Eq 'hidden|Marketplace|████|Tip:' <<<"$output"; then
@@ -452,10 +467,8 @@ EOF
 	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
 	# Every skill source is pinned to a commit.
 	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
-	grep -Fq 'claude plugin install ponytail@linux-toolbox --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
-	grep -Fq 'codex plugin add ponytail@ponytail' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	settings="$root/home/.claude/settings.json"

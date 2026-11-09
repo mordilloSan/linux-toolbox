@@ -139,24 +139,6 @@ if selected codex; then
 	skill_agents=(codex "${skill_agents[@]}")
 fi
 
-info "Installing or updating Ponytail..."
-if selected claude; then
-	# Ponytail comes from this repository's marketplace, pinned to the commit in .claude-plugin/marketplace.json.
-	# Claude Code updates it only when its plugin.json "version" changes: move that sha only to a commit with a new version.
-	claude plugin marketplace update linux-toolbox >/dev/null 2>&1 ||
-		run_quiet claude plugin marketplace add https://github.com/mordilloSan/linux-toolbox.git
-	run_quiet claude plugin install ponytail@linux-toolbox --yes
-	run_quiet claude plugin update ponytail@linux-toolbox
-	# Drop the unpinned copy older versions installed, only once the pinned one is in place.
-	claude plugin uninstall ponytail@ponytail >/dev/null 2>&1 || true
-	claude plugin marketplace remove ponytail --scope user >/dev/null 2>&1 || true
-fi
-if selected codex; then
-	run_quiet codex plugin marketplace add DietrichGebert/ponytail
-	run_quiet codex plugin add ponytail@ponytail
-fi
-ok "Ponytail installed"
-
 if selected claude; then
 	info "Installing the Go and TypeScript language server plugins..."
 	# Anthropic's official marketplace; Claude Code normally has it already.

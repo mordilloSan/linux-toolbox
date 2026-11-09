@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go with `gopls`, and latest Node.js LTS through NVM with `typescript-language-server` |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), Ponytail, interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence. The skills, and Ponytail for Claude Code, are pinned to reviewed commits; Codex gets Ponytail from its upstream main branch. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
+| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence. The skills are pinned to reviewed commits. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL 8 or newer (and compatible) distributions using `apt` or `dnf`.
@@ -72,13 +72,13 @@ After installing Go, log out and back in, or run `. /etc/profile.d/go.sh`, so pr
 
 ## Options
 
-Skip the linux-toolbox guidance block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, and its permission rules and hooks in `~/.claude/settings.json`. Installing plugins still adds plugin entries to `settings.json`:
+Skip the linux-toolbox guidance block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, and its permission rules and hooks in `~/.claude/settings.json`:
 
 ```bash
 LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 bash install.sh
 ```
 
-Without this option, each run adds back those git rules if you removed them, and replaces a Ponytail installed from the upstream `ponytail` marketplace with the pinned copy.
+Without this option, each run adds back those git rules if you removed them.
 
 Skip the menu and the installer's own questions (sudo may still ask for your password; with no terminal it needs passwordless or recently cached sudo). This installs or updates components 1 to 7, keeps anything you set up yourself, and skips the Ubuntu cleanup:
 
