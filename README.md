@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go with `gopls`, and latest Node.js LTS through NVM with `typescript-language-server` |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), interface skills, `find-skills`, and selected Go skills for each selected agent. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence. The skills are pinned to reviewed commits. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
+| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), interface skills, `find-skills`, and selected Go skills for each selected agent. On apt and dnf systems Claude Code comes from Anthropic's signed package repository (the `latest` channel, or `stable` when `autoUpdatesChannel` is `stable` in `~/.claude/settings.json`), so system upgrades update it; a copy from the native installer is replaced. Other systems get the native installer. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence. The skills are pinned to reviewed commits. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL 8 or newer (and compatible) distributions using `apt` or `dnf`.
@@ -146,6 +146,8 @@ make merge-release
 make rf-version
 make rf-upgrade
 ```
+
+In a terminal, every `make` run ends with a line that lists these targets. Plain `make` in a folder without a Makefile, and `make help` where the Makefile has no `help` target, print only that line; a project's own `help` output comes first. Output that goes to a pipe or a file is unchanged.
 
 Run `source ~/.bashrc` (or `~/.zshrc`) or open a new terminal after first installing the targets. Release branches use the `dev/v*` naming convention. If a project Makefile already defines `start-dev`, `open-pr` or `merge-release`, make warns "overriding recipe" on every run there; delete those targets from the project Makefile.
 
