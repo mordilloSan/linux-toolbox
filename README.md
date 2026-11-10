@@ -149,7 +149,9 @@ make rf-upgrade
 
 `make help` ends with a line that lists these targets, after the project's own `help` output when the Makefile has a `help` target. Plain `make` in a folder without a Makefile prints only that line. Other `make` runs are unchanged.
 
-Run `source ~/.bashrc` (or `~/.zshrc`) or open a new terminal after first installing the targets. Release branches use the `dev/v*` naming convention. If a project Makefile already defines `start-dev`, `open-pr` or `merge-release`, make warns "overriding recipe" on every run there; delete those targets from the project Makefile.
+The targets and this `make` behaviour belong to gh-release-flow: the installer runs `gh release-flow setup-make`, and `make rf-upgrade` updates the extension and then refreshes them.
+
+Open a new terminal after first installing the targets, or when the installer or `make rf-upgrade` says so. Release branches use the `dev/v*` naming convention. If a project Makefile already defines `start-dev`, `open-pr` or `merge-release`, make warns "overriding recipe" on every run there; delete those targets from the project Makefile.
 
 Run `make check` for syntax and style checks, and `make test` for the isolated installer behavior tests. Pull requests run both targets, and a release is published only when the PR's Check workflow passed. Merging a release PR then creates the tag, publishes all scripts as release assets, and pins the entrypoint to that release.
 
