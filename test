@@ -400,22 +400,22 @@ EOF
 	[[ $(MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" --no-print-directory where) == Makefile ]]
 	# shellcheck disable=SC2016
 	[[ $(grep -Fxc -- '[ ! -f "$HOME/.config/make/release-flow.sh" ] || . "$HOME/.config/make/release-flow.sh"' "$root/home/.zshrc") == 1 ]]
-	# The make function lists the targets where make has nothing to run, and after each run in a terminal.
+	# The make function lists the targets where make has nothing to run and after make help, never after other runs.
 	mkdir -p "$root/empty" "$root/project"
-	printf 'help:\n\t@echo project help\nfail:\n\t@exit 1\n' >"$root/project/Makefile"
+	printf 'help:\n\t@echo project help\nbuild:\n\t@echo built\nfail:\n\t@exit 1\n' >"$root/project/Makefile"
 	function_test() {
 		(cd "$root/$1" && HOME="$root/home" MAKEFILES="$root/home/.config/make/release-flow.mk" \
 			bash -c '. "$HOME/.config/make/release-flow.sh" && make "$@"' make "${@:2}")
 	}
 	targets='release-flow: make start-dev | open-pr | merge-release | rf-version | rf-upgrade'
 	[[ $(function_test empty) == "$targets" && $(function_test empty help) == "$targets" ]]
-	[[ $(function_test . help) == "$targets" && $(function_test project help) == 'project help' ]]
+	[[ $(function_test . help) == "$targets" && $(function_test project help) == "project help"$'\n'"$targets" ]]
 	status=0
 	function_test project fail >/dev/null 2>&1 || status=$?
 	[[ $status == 2 ]]
 	output=$(HOME="$root/home" MAKEFILES="$root/home/.config/make/release-flow.mk" script -qec \
-		"cd $(printf %q "$root/project") && bash -c '. \"\$HOME/.config/make/release-flow.sh\" && make help'" /dev/null)
-	[[ ${output//$'\r'/} == "project help"$'\n'"$targets" ]]
+		"cd $(printf %q "$root/project") && bash -c '. \"\$HOME/.config/make/release-flow.sh\" && make build'" /dev/null)
+	[[ ${output//$'\r'/} == built ]]
 	# The file v1.10.0 wrote is replaced without asking, so the new targets appear.
 	printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' 'start-dev open-pr merge-release:' \
 		$'\t@gh release-flow "$@"' >"$root/home/.config/make/release-flow.mk"
@@ -431,7 +431,7 @@ EOF
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
 	grep -Fq 'skipped the Make targets' <<<"$output"
 	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
-	pass 'release-flow Make targets work, list themselves after make, notice once, and keep a custom Make file'
+	pass 'release-flow Make targets work, list themselves in make help, notice once, and keep a custom Make file'
 }
 
 test_ai_tools() {

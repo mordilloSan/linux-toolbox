@@ -63,8 +63,8 @@ else
 	printf '%s\n' "$make_targets" >"$make_config"
 fi
 
-# A make function for interactive shells: it lists the release-flow targets on their own line after each run
-# in a terminal, and is all that plain make without a Makefile, or make help without a help target, prints.
+# A make function for interactive shells: make help ends with the release-flow targets, after the project's
+# own help when it has one, and they are all that plain make without a Makefile prints.
 # This script owns the file and rewrites it on each run.
 cat >"$HOME/.config/make/release-flow.sh" <<'EOF'
 # Written by linux-toolbox install-release-flow.sh, which replaces it on each run.
@@ -74,16 +74,15 @@ make() {
 		printf '%s\n' "$targets"
 		return 0
 	fi
-	if [ "$*" = help ]; then
-		case $(LC_ALL=C command make -q help 2>&1 >/dev/null) in
-		*"No rule to make target 'help'"*)
-			printf '%s\n' "$targets"
-			return 0
-			;;
-		esac
+	if [ "$*" != help ]; then
+		command make "$@"
+		return
 	fi
-	command make "$@" || code=$?
-	[ ! -t 1 ] || printf '%s\n' "$targets"
+	case $(LC_ALL=C command make -q help 2>&1 >/dev/null) in
+	*"No rule to make target 'help'"*) ;;
+	*) command make help || code=$? ;;
+	esac
+	printf '%s\n' "$targets"
 	return "$code"
 }
 EOF

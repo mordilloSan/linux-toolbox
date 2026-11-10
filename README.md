@@ -147,7 +147,7 @@ make rf-version
 make rf-upgrade
 ```
 
-In a terminal, every `make` run ends with a line that lists these targets. Plain `make` in a folder without a Makefile, and `make help` where the Makefile has no `help` target, print only that line; a project's own `help` output comes first. Output that goes to a pipe or a file is unchanged.
+`make help` ends with a line that lists these targets, after the project's own `help` output when the Makefile has a `help` target. Plain `make` in a folder without a Makefile prints only that line. Other `make` runs are unchanged.
 
 Run `source ~/.bashrc` (or `~/.zshrc`) or open a new terminal after first installing the targets. Release branches use the `dev/v*` naming convention. If a project Makefile already defines `start-dev`, `open-pr` or `merge-release`, make warns "overriding recipe" on every run there; delete those targets from the project Makefile.
 
