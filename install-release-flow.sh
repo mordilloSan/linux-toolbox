@@ -63,15 +63,47 @@ else
 	printf '%s\n' "$make_targets" >"$make_config"
 fi
 
+# A make function for interactive shells: it lists the release-flow targets on their own line after each run
+# in a terminal, and is all that plain make without a Makefile, or make help without a help target, prints.
+# This script owns the file and rewrites it on each run.
+cat >"$HOME/.config/make/release-flow.sh" <<'EOF'
+# Written by linux-toolbox install-release-flow.sh, which replaces it on each run.
+make() {
+	local code=0 targets='release-flow: make start-dev | open-pr | merge-release | rf-version | rf-upgrade'
+	if [ $# -eq 0 ] && [ ! -e GNUmakefile ] && [ ! -e makefile ] && [ ! -e Makefile ]; then
+		printf '%s\n' "$targets"
+		return 0
+	fi
+	if [ "$*" = help ]; then
+		case $(LC_ALL=C command make -q help 2>&1 >/dev/null) in
+		*"No rule to make target 'help'"*)
+			printf '%s\n' "$targets"
+			return 0
+			;;
+		esac
+	fi
+	command make "$@" || code=$?
+	[ ! -t 1 ] || printf '%s\n' "$targets"
+	return "$code"
+}
+EOF
+
 # shellcheck disable=SC2016
 makefiles_profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
-# The line is plain sh, so zsh reads it too; .zshrc only gets it when the user already has one.
+# shellcheck disable=SC2016
+function_profile='[ ! -f "$HOME/.config/make/release-flow.sh" ] || . "$HOME/.config/make/release-flow.sh"'
+# The lines are plain sh, so zsh reads them too; .zshrc only gets them when the user already has one.
 for rc in "$HOME/.bashrc" "${ZDOTDIR:-$HOME}/.zshrc"; do
 	[[ $rc == "$HOME/.bashrc" || -e $rc ]] || continue
-	grep -Fqxs -- "$makefiles_profile" "$rc" && continue
-	if [[ -s $rc ]] && ! tail -c 1 "$rc" | grep -q '^$'; then
-		printf '\n' >>"$rc"
-	fi
-	printf '%s\n' "$makefiles_profile" >>"$rc"
+	added=0
+	for line in "$makefiles_profile" "$function_profile"; do
+		grep -Fqxs -- "$line" "$rc" && continue
+		if [[ -s $rc ]] && ! tail -c 1 "$rc" | grep -q '^$'; then
+			printf '\n' >>"$rc"
+		fi
+		printf '%s\n' "$line" >>"$rc"
+		added=1
+	done
+	((added)) || continue
 	printf ' [NOTICE] Run source %s or open a new terminal before using the Make targets.\n' "${rc/#$HOME/\~}"
 done

@@ -60,6 +60,18 @@ for command in curl jq npx; do
 		exit 1
 	}
 done
+if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
+	pkg_manager=apt
+elif command -v dnf >/dev/null && command -v rpm >/dev/null; then
+	pkg_manager=dnf
+else
+	pkg_manager=
+fi
+# sudo resets the environment, so pass any proxy settings on explicitly.
+root_env=()
+for var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+	[[ -z ${!var:-} ]] || root_env+=("$var=${!var}")
+done
 # Claude Code's sandbox needs both bubblewrap and socat on Linux.
 info "Installing or updating bubblewrap and socat..."
 if ! command -v bwrap >/dev/null || ! command -v socat >/dev/null; then
@@ -67,14 +79,9 @@ if ! command -v bwrap >/dev/null || ! command -v socat >/dev/null; then
 		echo "sudo is required to install bubblewrap and socat." >&2
 		exit 1
 	}
-	# sudo resets the environment, so pass any proxy settings on explicitly.
-	root_env=()
-	for var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
-		[[ -z ${!var:-} ]] || root_env+=("$var=${!var}")
-	done
-	if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
+	if [[ $pkg_manager == apt ]]; then
 		run_quiet sudo env "${root_env[@]}" apt-get -o DPkg::Lock::Timeout=300 install -y -qq bubblewrap socat
-	elif command -v dnf >/dev/null && command -v rpm >/dev/null; then
+	elif [[ $pkg_manager == dnf ]]; then
 		run_quiet sudo env "${root_env[@]}" dnf install -y -q bubblewrap socat
 	else
 		echo "Install bubblewrap and socat with your system package manager." >&2
@@ -95,7 +102,7 @@ version_of() {
 }
 
 # Install or update an agent unless it already runs the latest version.
-# Arguments: name, command, latest version (may be empty), installer URL and runner.
+# Arguments: name, command, latest version (may be empty), then the install command.
 install_agent() {
 	local name=$1 command=$2 latest=$3 before after
 	shift 3
@@ -105,7 +112,8 @@ install_agent() {
 		return
 	fi
 	info "Installing or updating $name${before:+ (found $before)}..."
-	run_installer "$@"
+	"$@"
+	hash -r
 	command -v "$command" >/dev/null || {
 		echo "$name installation failed." >&2
 		exit 1
@@ -120,6 +128,59 @@ install_agent() {
 	fi
 }
 
+# The native installer links ~/.local/bin/claude into ~/.local/share/claude, ahead of the package on PATH.
+native_claude() {
+	[[ $(readlink "$HOME/.local/bin/claude" 2>/dev/null) == "$HOME/.local/share/claude/"* ]]
+}
+
+# Install Claude Code from Anthropic's signed apt or dnf repository on the selected channel,
+# so system upgrades update it. A repository the user already set up, on either channel, stays.
+install_claude_package() {
+	local tmp
+	if ! grep -qsE '^[^#]*downloads\.claude\.ai/claude-code/(apt|rpm)/' \
+		/etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources /etc/yum.repos.d/*.repo; then
+		tmp=$(mktemp -d)
+		curl -fsSL --speed-limit 1 --speed-time 60 https://downloads.claude.ai/keys/claude-code.asc -o "$tmp/claude-code.asc"
+		if ! command -v gpg >/dev/null; then
+			if [[ $pkg_manager == apt ]]; then
+				run_quiet sudo env "${root_env[@]}" apt-get -o DPkg::Lock::Timeout=300 install -y -qq gpg
+			else
+				run_quiet sudo env "${root_env[@]}" dnf install -y -q gnupg2
+			fi
+		fi
+		# The fingerprint Anthropic publishes; the key must have no other.
+		if [[ $(gpg --show-keys --with-colons "$tmp/claude-code.asc" 2>/dev/null | awk -F: '$1 == "fpr" {print $10}') != 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE ]]; then
+			rm -rf "$tmp"
+			echo "The Claude Code signing key does not match its published fingerprint; nothing was installed." >&2
+			return 1
+		fi
+		if [[ $pkg_manager == apt ]]; then
+			printf '%s\n' "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/$channel $channel main" >"$tmp/source"
+			run_quiet sudo install -D -m 644 "$tmp/claude-code.asc" /etc/apt/keyrings/claude-code.asc
+			run_quiet sudo install -D -m 644 "$tmp/source" /etc/apt/sources.list.d/claude-code.list
+		else
+			printf '%s\n' '[claude-code]' 'name=Claude Code' "baseurl=https://downloads.claude.ai/claude-code/rpm/$channel" \
+				'enabled=1' 'gpgcheck=1' 'gpgkey=https://downloads.claude.ai/keys/claude-code.asc' >"$tmp/source"
+			# Import the checked key, so dnf -y does not accept whatever key it downloads.
+			run_quiet sudo rpm --import "$tmp/claude-code.asc"
+			run_quiet sudo install -D -m 644 "$tmp/source" /etc/yum.repos.d/claude-code.repo
+		fi
+		rm -rf "$tmp"
+	fi
+	if [[ $pkg_manager == apt ]]; then
+		run_quiet sudo env "${root_env[@]}" apt-get -qq update
+		run_quiet sudo env "${root_env[@]}" apt-get -o DPkg::Lock::Timeout=300 install -y -qq claude-code
+	else
+		# --best: dnf otherwise skips the upgrade of a package that is already installed.
+		run_quiet sudo env "${root_env[@]}" dnf install -y -q --refresh --best claude-code
+	fi
+	if native_claude; then
+		rm -f "$HOME/.local/bin/claude"
+		rm -rf "$HOME/.local/share/claude"
+		ok "Removed the Claude Code copy from the native installer"
+	fi
+}
+
 skill_agents=()
 if selected claude; then
 	# Users on the stable channel run a release about a week behind 'latest'; compare with their channel.
@@ -128,14 +189,20 @@ if selected claude; then
 	*) channel=latest ;;
 	esac
 	latest=$(curl -fsSL --speed-limit 1 --speed-time 60 "https://downloads.claude.ai/claude-code-releases/$channel" 2>/dev/null || true)
-	install_agent 'Claude Code' claude "$latest" https://claude.ai/install.sh bash
+	if [[ -n $pkg_manager ]]; then
+		# A copy from the native installer is replaced by the package even when it is up to date.
+		! native_claude || latest=
+		install_agent 'Claude Code' claude "$latest" install_claude_package
+	else
+		install_agent 'Claude Code' claude "$latest" run_installer https://claude.ai/install.sh bash
+	fi
 	skill_agents+=(claude-code)
 fi
 
 if selected codex; then
 	latest=$(curl -fsSL --speed-limit 1 --speed-time 60 https://releases.openai.com/codex/channels/latest 2>/dev/null |
 		sed -n 's/.*"tag_name": *"rust-v\([^"]*\)".*/\1/p' || true)
-	install_agent Codex codex "$latest" https://chatgpt.com/codex/install.sh env CODEX_NON_INTERACTIVE=1 sh
+	install_agent Codex codex "$latest" run_installer https://chatgpt.com/codex/install.sh env CODEX_NON_INTERACTIVE=1 sh
 	skill_agents=(codex "${skill_agents[@]}")
 fi
 
