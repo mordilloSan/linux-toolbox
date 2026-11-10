@@ -29,7 +29,13 @@ for command in gh make; do
 	}
 done
 
-if ! extension_output=$(gh extension install mordilloSan/gh-release-flow --force 2>&1); then
+# install --force reports an upgrade of an installed extension without moving its checkout, so upgrade it instead.
+if gh extension list 2>/dev/null | grep -Fq 'mordilloSan/gh-release-flow'; then
+	extension_command=(upgrade release-flow)
+else
+	extension_command=(install mordilloSan/gh-release-flow)
+fi
+if ! extension_output=$(gh extension "${extension_command[@]}" 2>&1); then
 	printf '%s\n' "$extension_output" >&2
 	exit 1
 fi
@@ -42,6 +48,7 @@ fi
 
 # gh release-flow setup-make owns the Make targets and the make shell function; make rf-upgrade refreshes them.
 make_config="$HOME/.config/make/release-flow.mk"
+replace_answer=
 if [[ -e $make_config && $(head -n 1 "$make_config") != '# Written by gh release-flow setup-make'* ]]; then
 	# The targets this script wrote up to v1.14.0 are replaced without asking.
 	old_targets=$(printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' \
@@ -62,11 +69,12 @@ if [[ -e $make_config && $(head -n 1 "$make_config") != '# Written by gh release
 		notice "Kept the existing $make_config; skipped the Make targets."
 		exit 0
 	fi
-	rm -f -- "$make_config"
+	replace_answer=y
 fi
 
-# stdin may be the piped installer script, so setup-make must not read it.
-if ! setup_output=$(gh release-flow setup-make </dev/null 2>&1); then
+# setup-make asks before it replaces a file it did not write. The answer is fed to it, because stdin
+# may be the piped installer script.
+if ! setup_output=$(gh release-flow setup-make <<<"$replace_answer" 2>&1); then
 	printf '%s\n' "$setup_output" >&2
 	exit 1
 fi

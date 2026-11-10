@@ -372,21 +372,34 @@ EOF
 test_release_flow() {
 	local root="$test_dir/release-flow" first second output make_config
 	mkdir -p "$root/bin" "$root/home"
-	# The fake setup-make writes its marker, and asks for a new terminal only on its first run.
+	# The fake gh installs the extension once; its setup-make writes a marker, asks for a new terminal
+	# only on its first run, and replaces a file it did not write only after a yes on stdin.
 	cat >"$root/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-if [[ $* != 'release-flow setup-make' ]]; then
+marker='# Written by gh release-flow setup-make, which replaces it on each run.'
+targets=$HOME/.config/make/release-flow.mk
+case $* in
+'extension list') [[ ! -e $GH_LOG.installed ]] || printf 'gh release-flow\tmordilloSan/gh-release-flow\tabc\n' ;;
+'extension install mordilloSan/gh-release-flow')
+	: >"$GH_LOG.installed"
 	echo 'hidden gh output'
-	exit 0
-fi
-[[ ! -e $HOME/.config/make/release-flow.mk ]] || {
-	echo 'OK: Make targets are up to date.'
-	exit 0
-}
-mkdir -p "$HOME/.config/make"
-echo '# Written by gh release-flow setup-make, which replaces it on each run.' >"$HOME/.config/make/release-flow.mk"
-echo 'OK: Make targets installed. Open a new terminal to load them.'
+	;;
+'release-flow setup-make')
+	if [[ -e $targets && $(head -n 1 "$targets") == "$marker" ]]; then
+		echo 'OK: Make targets are up to date.'
+		exit 0
+	fi
+	if [[ -e $targets ]]; then
+		read -r answer || answer=''
+		[[ $answer == y ]] || exit 1
+	fi
+	mkdir -p "${targets%/*}"
+	echo "$marker" >"$targets"
+	echo 'OK: Make targets installed. Open a new terminal to load them.'
+	;;
+*) echo 'hidden gh output' ;;
+esac
 EOF
 	chmod +x "$root/bin/gh"
 	make_config=$root/home/.config/make/release-flow.mk
@@ -398,6 +411,9 @@ EOF
 		return 1
 	fi
 	[[ $(grep -Fxc 'release-flow setup-make' "$root/gh.log") == 2 ]]
+	# An installed extension is upgraded: install --force would leave its checkout where it was.
+	[[ $(grep -Fxc 'extension install mordilloSan/gh-release-flow' "$root/gh.log") == 1 ]]
+	[[ $(grep -Fxc 'extension upgrade release-flow' "$root/gh.log") == 1 ]]
 	# The targets this script wrote before setup-make existed are replaced without asking.
 	printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' 'start-dev open-pr merge-release:' \
 		$'\t@gh release-flow "$@"' >"$make_config"
@@ -414,7 +430,7 @@ EOF
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
 	grep -Fq 'skipped the Make targets' <<<"$output"
 	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
-	pass 'release-flow installer runs setup-make, notices once, replaces its old targets, and keeps a custom Make file'
+	pass 'release-flow installer installs or upgrades the extension, runs setup-make, notices once, replaces its old targets, and keeps a custom Make file'
 }
 
 test_ai_tools() {
