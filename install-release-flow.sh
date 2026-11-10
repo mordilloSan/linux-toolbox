@@ -29,7 +29,13 @@ for command in gh make; do
 	}
 done
 
-if ! extension_output=$(gh extension install mordilloSan/gh-release-flow --force 2>&1); then
+# install --force reports an upgrade of an installed extension without moving its checkout, so upgrade it instead.
+if gh extension list 2>/dev/null | grep -Fq 'mordilloSan/gh-release-flow'; then
+	extension_command=(upgrade release-flow)
+else
+	extension_command=(install mordilloSan/gh-release-flow)
+fi
+if ! extension_output=$(gh extension "${extension_command[@]}" 2>&1); then
 	printf '%s\n' "$extension_output" >&2
 	exit 1
 fi
@@ -40,70 +46,37 @@ fi
 	exit 0
 }
 
+# gh release-flow setup-make owns the Make targets and the make shell function; make rf-upgrade refreshes them.
 make_config="$HOME/.config/make/release-flow.mk"
-make_targets=$(printf '%s\n' \
-	'.PHONY: start-dev open-pr merge-release rf-version rf-upgrade' \
-	'' \
-	'start-dev open-pr merge-release:' \
-	$'\t@gh release-flow "$@"' \
-	'' \
-	'rf-version rf-upgrade:' \
-	$'\t@gh release-flow "$(@:rf-%=%)"' \
-	'' \
-	'# Keep project Makefiles that read MAKEFILE_LIST unaware of this file.' \
-	'MAKEFILE_LIST :=')
-# The v1.10.0 targets: this script wrote them, so they are replaced without asking.
-old_targets=$(printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' \
-	'start-dev open-pr merge-release:' $'\t@gh release-flow "$@"')
-if [[ -e $make_config && $(<"$make_config") != "$make_targets" && $(<"$make_config") != "$old_targets" ]] &&
-	! confirm "$make_config has different content. Replace it with the release-flow targets?"; then
-	notice "Kept the existing $make_config"
-else
-	install -d "${make_config%/*}"
-	printf '%s\n' "$make_targets" >"$make_config"
+replace_answer=
+if [[ -e $make_config && $(head -n 1 "$make_config") != '# Written by gh release-flow setup-make'* ]]; then
+	# The targets this script wrote up to v1.14.0 are replaced without asking.
+	old_targets=$(printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' \
+		'start-dev open-pr merge-release:' $'\t@gh release-flow "$@"')
+	current_targets=$(printf '%s\n' \
+		'.PHONY: start-dev open-pr merge-release rf-version rf-upgrade' \
+		'' \
+		'start-dev open-pr merge-release:' \
+		$'\t@gh release-flow "$@"' \
+		'' \
+		'rf-version rf-upgrade:' \
+		$'\t@gh release-flow "$(@:rf-%=%)"' \
+		'' \
+		'# Keep project Makefiles that read MAKEFILE_LIST unaware of this file.' \
+		'MAKEFILE_LIST :=')
+	if [[ $(<"$make_config") != "$old_targets" && $(<"$make_config") != "$current_targets" ]] &&
+		! confirm "$make_config has different content. Replace it with the release-flow targets?"; then
+		notice "Kept the existing $make_config; skipped the Make targets."
+		exit 0
+	fi
+	replace_answer=y
 fi
 
-# A make function for interactive shells: it lists the release-flow targets on their own line after each run
-# in a terminal, and is all that plain make without a Makefile, or make help without a help target, prints.
-# This script owns the file and rewrites it on each run.
-cat >"$HOME/.config/make/release-flow.sh" <<'EOF'
-# Written by linux-toolbox install-release-flow.sh, which replaces it on each run.
-make() {
-	local code=0 targets='release-flow: make start-dev | open-pr | merge-release | rf-version | rf-upgrade'
-	if [ $# -eq 0 ] && [ ! -e GNUmakefile ] && [ ! -e makefile ] && [ ! -e Makefile ]; then
-		printf '%s\n' "$targets"
-		return 0
-	fi
-	if [ "$*" = help ]; then
-		case $(LC_ALL=C command make -q help 2>&1 >/dev/null) in
-		*"No rule to make target 'help'"*)
-			printf '%s\n' "$targets"
-			return 0
-			;;
-		esac
-	fi
-	command make "$@" || code=$?
-	[ ! -t 1 ] || printf '%s\n' "$targets"
-	return "$code"
-}
-EOF
-
-# shellcheck disable=SC2016
-makefiles_profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
-# shellcheck disable=SC2016
-function_profile='[ ! -f "$HOME/.config/make/release-flow.sh" ] || . "$HOME/.config/make/release-flow.sh"'
-# The lines are plain sh, so zsh reads them too; .zshrc only gets them when the user already has one.
-for rc in "$HOME/.bashrc" "${ZDOTDIR:-$HOME}/.zshrc"; do
-	[[ $rc == "$HOME/.bashrc" || -e $rc ]] || continue
-	added=0
-	for line in "$makefiles_profile" "$function_profile"; do
-		grep -Fqxs -- "$line" "$rc" && continue
-		if [[ -s $rc ]] && ! tail -c 1 "$rc" | grep -q '^$'; then
-			printf '\n' >>"$rc"
-		fi
-		printf '%s\n' "$line" >>"$rc"
-		added=1
-	done
-	((added)) || continue
-	printf ' [NOTICE] Run source %s or open a new terminal before using the Make targets.\n' "${rc/#$HOME/\~}"
-done
+# setup-make asks before it replaces a file it did not write. The answer is fed to it, because stdin
+# may be the piped installer script.
+if ! setup_output=$(gh release-flow setup-make <<<"$replace_answer" 2>&1); then
+	printf '%s\n' "$setup_output" >&2
+	exit 1
+fi
+[[ $setup_output != *'Open a new terminal'* ]] ||
+	notice "Open a new terminal before using the Make targets."

@@ -370,68 +370,67 @@ EOF
 }
 
 test_release_flow() {
-	local root="$test_dir/release-flow" first second profile output targets status
+	local root="$test_dir/release-flow" first second output make_config
 	mkdir -p "$root/bin" "$root/home"
+	# The fake gh installs the extension once; its setup-make writes a marker, asks for a new terminal
+	# only on its first run, and replaces a file it did not write only after a yes on stdin.
 	cat >"$root/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
-echo 'hidden gh output'
+marker='# Written by gh release-flow setup-make, which replaces it on each run.'
+targets=$HOME/.config/make/release-flow.mk
+case $* in
+'extension list') [[ ! -e $GH_LOG.installed ]] || printf 'gh release-flow\tmordilloSan/gh-release-flow\tabc\n' ;;
+'extension install mordilloSan/gh-release-flow')
+	: >"$GH_LOG.installed"
+	echo 'hidden gh output'
+	;;
+'release-flow setup-make')
+	if [[ -e $targets && $(head -n 1 "$targets") == "$marker" ]]; then
+		echo 'OK: Make targets are up to date.'
+		exit 0
+	fi
+	if [[ -e $targets ]]; then
+		read -r answer || answer=''
+		[[ $answer == y ]] || exit 1
+	fi
+	mkdir -p "${targets%/*}"
+	echo "$marker" >"$targets"
+	echo 'OK: Make targets installed. Open a new terminal to load them.'
+	;;
+*) echo 'hidden gh output' ;;
+esac
 EOF
 	chmod +x "$root/bin/gh"
-	# zsh users with a .zshrc get the same line there.
-	: >"$root/home/.zshrc"
+	make_config=$root/home/.config/make/release-flow.mk
 	first=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" bash install-release-flow.sh)
 	second=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" bash install-release-flow.sh)
-	grep -Fq 'Run source ~/.bashrc' <<<"$first"
+	grep -Fq 'Open a new terminal' <<<"$first"
 	[[ -z $second ]]
 	if grep -Fq 'hidden gh output' <<<"$first"; then
 		return 1
 	fi
-	# shellcheck disable=SC2016
-	profile='case " ${MAKEFILES:-} " in *" $HOME/.config/make/release-flow.mk "*) ;; *) export MAKEFILES="$HOME/.config/make/release-flow.mk${MAKEFILES:+ $MAKEFILES}" ;; esac'
-	[[ $(grep -Fxc -- "$profile" "$root/home/.bashrc") == 1 && $(grep -Fxc -- "$profile" "$root/home/.zshrc") == 1 ]]
-	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
-		--no-print-directory --dry-run start-dev | grep -Fqx 'gh release-flow "start-dev"'
-	MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" \
-		--no-print-directory --dry-run rf-upgrade | grep -Fqx 'gh release-flow "upgrade"'
-	# Project Makefiles that read MAKEFILE_LIST do not see the global file.
-	# shellcheck disable=SC2016
-	printf 'where:\n\t@echo $(firstword $(MAKEFILE_LIST))\n' >"$root/Makefile"
-	[[ $(MAKEFILES="$root/home/.config/make/release-flow.mk" make --directory="$root" --no-print-directory where) == Makefile ]]
-	# shellcheck disable=SC2016
-	[[ $(grep -Fxc -- '[ ! -f "$HOME/.config/make/release-flow.sh" ] || . "$HOME/.config/make/release-flow.sh"' "$root/home/.zshrc") == 1 ]]
-	# The make function lists the targets where make has nothing to run, and after each run in a terminal.
-	mkdir -p "$root/empty" "$root/project"
-	printf 'help:\n\t@echo project help\nfail:\n\t@exit 1\n' >"$root/project/Makefile"
-	function_test() {
-		(cd "$root/$1" && HOME="$root/home" MAKEFILES="$root/home/.config/make/release-flow.mk" \
-			bash -c '. "$HOME/.config/make/release-flow.sh" && make "$@"' make "${@:2}")
-	}
-	targets='release-flow: make start-dev | open-pr | merge-release | rf-version | rf-upgrade'
-	[[ $(function_test empty) == "$targets" && $(function_test empty help) == "$targets" ]]
-	[[ $(function_test . help) == "$targets" && $(function_test project help) == 'project help' ]]
-	status=0
-	function_test project fail >/dev/null 2>&1 || status=$?
-	[[ $status == 2 ]]
-	output=$(HOME="$root/home" MAKEFILES="$root/home/.config/make/release-flow.mk" script -qec \
-		"cd $(printf %q "$root/project") && bash -c '. \"\$HOME/.config/make/release-flow.sh\" && make help'" /dev/null)
-	[[ ${output//$'\r'/} == "project help"$'\n'"$targets" ]]
-	# The file v1.10.0 wrote is replaced without asking, so the new targets appear.
+	[[ $(grep -Fxc 'release-flow setup-make' "$root/gh.log") == 2 ]]
+	# An installed extension is upgraded: install --force would leave its checkout where it was.
+	[[ $(grep -Fxc 'extension install mordilloSan/gh-release-flow' "$root/gh.log") == 1 ]]
+	[[ $(grep -Fxc 'extension upgrade release-flow' "$root/gh.log") == 1 ]]
+	# The targets this script wrote before setup-make existed are replaced without asking.
 	printf '%s\n' '.PHONY: start-dev open-pr merge-release' '' 'start-dev open-pr merge-release:' \
-		$'\t@gh release-flow "$@"' >"$root/home/.config/make/release-flow.mk"
+		$'\t@gh release-flow "$@"' >"$make_config"
 	GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" LINUX_TOOLBOX_NONINTERACTIVE=1 \
 		bash install-release-flow.sh >/dev/null
-	grep -Fq 'rf-version rf-upgrade:' "$root/home/.config/make/release-flow.mk"
-	printf 'custom:\n' >"$root/home/.config/make/release-flow.mk"
+	grep -Fq 'Written by gh release-flow setup-make' "$make_config"
+	# A file with other content is kept, and setup-make is not run.
+	printf 'custom:\n' >"$make_config"
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash install-release-flow.sh)
 	grep -Fq 'Kept the existing' <<<"$output"
-	[[ $(<"$root/home/.config/make/release-flow.mk") == custom: ]]
+	[[ $(<"$make_config") == custom: && $(grep -Fxc 'release-flow setup-make' "$root/gh.log") == 3 ]]
 	# make cannot load files from a home with a space, so the targets are skipped with a notice.
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
 	grep -Fq 'skipped the Make targets' <<<"$output"
 	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
-	pass 'release-flow Make targets work, list themselves after make, notice once, and keep a custom Make file'
+	pass 'release-flow installer installs or upgrades the extension, runs setup-make, notices once, replaces its old targets, and keeps a custom Make file'
 }
 
 test_ai_tools() {
