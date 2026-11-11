@@ -132,6 +132,13 @@ Run the local installer from the repository root:
 
 Local runs use the sibling scripts in the checkout. Piped installs download child scripts from the entrypoint's configured remote source.
 
+## VS Code setup
+
+`vscode/` holds the editor setup used to work on these servers over Remote-SSH. The installer does not touch it; it is restored by hand on the PC.
+
+- `linux-toolbox.code-profile` is a VS Code profile export with settings, keybindings and the extension list, including the extensions that run on the server. Import it with "Profiles: Import Profile…". UI state, host addresses and home paths have been stripped from it; do the same after a new export.
+- GitHub Copilot is enabled only for the commit message button in Source Control, with Conventional Commits instructions. Completions, code actions, review and agents are turned off. VS Code cannot remove the Chat view while Copilot is enabled, so keep the secondary side bar closed.
+
 ## Releases
 
 The installer provides release targets without requiring a repository Makefile:
