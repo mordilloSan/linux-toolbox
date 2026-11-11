@@ -519,8 +519,8 @@ EOF
 	grep -Fq 'claude plugin install superpowers@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install frontend-design@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install claude-code-setup@claude-plugins-official --yes' "$root/agents.log"
-	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
+	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 13 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 13 ]]
 	settings="$root/home/.claude/settings.json"
 	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],0,1]' ]]
 	# Claude Code's own setting keeps Co-Authored-By out of commits.
@@ -583,7 +583,7 @@ EOF
 	[[ ! -e $root/home/.codex ]]
 	[[ $(head -n 1 "$claude_md") == '# My notes' && $(tail -n 1 "$claude_md") == '# More notes' ]]
 	[[ $(grep -Fcx -- "$begin" "$claude_md") == 1 && $(grep -Fc 'When spawning a subagent' "$claude_md") == 1 ]]
-	[[ $(wc -l <"$claude_md") == 13 ]]
+	[[ $(wc -l <"$claude_md") == 15 ]]
 	if grep -Fq 'stale rule' "$claude_md"; then
 		return 1
 	fi
@@ -611,7 +611,7 @@ EOF
 		return 1
 	fi
 	printf '%s\n' "$begin" '- keep me' >"$root/home/.codex/AGENTS.md"
-	[[ $(wc -l <"$claude_md") == 13 ]]
+	[[ $(wc -l <"$claude_md") == 15 ]]
 	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
 	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
 	if grep -Eq 'Installing or updating (Claude Code|Codex)' <<<"$output"; then
