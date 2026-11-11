@@ -434,11 +434,21 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output path begin end claude_md settings hook status=0
-	# Hide real agents installed under the developer's home directory.
-	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
-	path="$root/bin:$path"
+	local root="$test_dir/ai" output path dir shadow begin end claude_md settings hook status=0
 	mkdir -p "$root/bin" "$root/home"
+	# Hide real agents: drop the developer's home directories, and replace any other
+	# directory that holds one (the apt package puts claude in /usr/bin) with a copy without it.
+	path="$root/bin"
+	while IFS= read -r dir; do
+		[[ -n $dir && $dir != "$HOME"/* ]] || continue
+		if [[ -e $dir/claude || -e $dir/codex ]]; then
+			shadow=$(mktemp -d "$root/path.XXXXXX")
+			ln -s "$dir"/* "$shadow/"
+			rm -f "$shadow/claude" "$shadow/codex"
+			dir=$shadow
+		fi
+		path="$path:$dir"
+	done < <(tr ':' '\n' <<<"$PATH")
 	cat >"$root/bin/agent" <<'EOF'
 #!/usr/bin/env bash
 [[ $* != --version ]] || exec echo "${0##*/} 1.2.3"
@@ -498,6 +508,9 @@ EOF
 	grep -Fq 'sudo env apt-get -o DPkg::Lock::Timeout=300 install -y -qq claude-code' "$root/agents.log"
 	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install superpowers@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install frontend-design@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install claude-code-setup@claude-plugins-official --yes' "$root/agents.log"
 	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
 	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
 	settings="$root/home/.claude/settings.json"
