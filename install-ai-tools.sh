@@ -207,12 +207,12 @@ if selected codex; then
 fi
 
 if selected claude; then
-	info "Installing the Go and TypeScript language server plugins..."
+	info "Installing the Claude Code plugins..."
 	# Anthropic's official marketplace; Claude Code normally has it already.
 	claude plugin marketplace update claude-plugins-official >/dev/null 2>&1 ||
 		run_quiet claude plugin marketplace add anthropics/claude-plugins-official
-	# They run gopls and typescript-language-server, which the Go and Node.js steps install.
-	for plugin in gopls-lsp typescript-lsp; do
+	# The two LSP plugins run gopls and typescript-language-server, which the Go and Node.js steps install.
+	for plugin in gopls-lsp typescript-lsp superpowers frontend-design claude-code-setup; do
 		run_quiet claude plugin install "$plugin@claude-plugins-official" --yes
 		ok "$plugin installed"
 	done
@@ -270,7 +270,9 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 			- For GitHub Actions workflows, run `actionlint` after changes.
 			- To read code, locate it with `rg -n` and read only the relevant line range; don't `cat` whole files or several files at once, since everything read stays in context for the rest of the session.
 			- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.
-			- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
+			- Before a multi-agent run, say which model plans, builds and reviews, and give risky code to a stronger model.
+			- When asked a question, answer it; don't build or change anything until asked to.
+			- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, each paragraph on one unwrapped line, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
 			- Never read, print, or commit secrets such as `.env` files, tokens, or private keys; refer to them by name.
 			- In repositories with `dev/vX.Y.Z` release branches, releases go through gh-release-flow (`gh release-flow start-dev vX.Y.Z`, `open-pr`, `merge`); never create tags or GitHub Releases by hand, and merge only when asked.
 		EOF

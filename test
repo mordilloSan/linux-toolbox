@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
+# Most checks are bare commands that stop the run under set -e, so say which one failed.
+trap 'printf "not ok - %s, line %s: %s\n" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # Keep the developer's own settings out of the checks. Under make test, the make variables would
 # turn the tests' own make runs into sub-makes that print "Entering directory".
 unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME MAKELEVEL MAKEFLAGS MFLAGS "${!LINUX_TOOLBOX_@}"
@@ -39,11 +41,21 @@ EOF
 	output=$(MOCK_CURL_LOG="$root/remote" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash <install.sh)
 	grep -Fq 'Setup complete' <<<"$output"
-	grep -Fq 'Git identity setup skipped' <<<"$output"
-	grep -Fq 'GitHub authentication setup skipped' <<<"$output"
+	# Without a terminal the Git item starts unchecked, since its setup asks questions.
+	grep -Eq '\[ \] 8\) Git identity and GitHub sign-in .*no identity, signed in to GitHub' <<<"$output"
+	grep -Fq 'Git and GitHub setup skipped' <<<"$output"
 	grep -Fq 'Open a new terminal' <<<"$output"
 	grep -Fq 'gopls installed' <<<"$output"
 	diff -u "$root/expected" "$root/remote"
+
+	# On a terminal, Enter accepts the menu as shown. With no Git identity the Git item starts
+	# checked and runs both Git steps.
+	output=$(printf '\n' | MOCK_CURL_LOG="$root/interactive" PATH="$root/bin:$PATH" HOME="$root/home" \
+		timeout 20 script -qfec 'bash <install.sh' /dev/null)
+	grep -Fq '8) Git identity and GitHub sign-in' <<<"$output"
+	grep -Fq 'Git identity configured' <<<"$output"
+	grep -Fq 'GitHub authentication configured' <<<"$output"
+	diff -u <(cat "$root/expected" && echo setup-git.sh) "$root/interactive"
 
 	# A failed download stops the run with a FAILED line, before any later step.
 	if output=$(MOCK_CURL_FAIL=install-node.sh MOCK_CURL_LOG="$root/failed" PATH="$root/bin:$PATH" \
@@ -73,7 +85,7 @@ EOF
 	MOCK_CURL_LOG="$root/pinned" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
 	diff -u "$root/expected" "$root/pinned"
-	pass 'installer uses remote scripts when piped or pinned, and local scripts from a checkout'
+	pass 'installer uses remote scripts when piped or pinned, local scripts from a checkout, and runs Git setup only when checked'
 }
 
 test_node_installer() {
@@ -434,11 +446,21 @@ EOF
 }
 
 test_ai_tools() {
-	local root="$test_dir/ai" output path begin end claude_md settings hook status=0
-	# Hide real agents installed under the developer's home directory.
-	path=$(tr ':' '\n' <<<"$PATH" | grep -Fv "$HOME/" | paste -sd :)
-	path="$root/bin:$path"
+	local root="$test_dir/ai" output path dir shadow begin end claude_md settings hook status=0
 	mkdir -p "$root/bin" "$root/home"
+	# Hide real agents: drop the developer's home directories, and replace any other
+	# directory that holds one (the apt package puts claude in /usr/bin) with a copy without it.
+	path="$root/bin"
+	while IFS= read -r dir; do
+		[[ -n $dir && $dir != "$HOME"/* ]] || continue
+		if [[ -e $dir/claude || -e $dir/codex ]]; then
+			shadow=$(mktemp -d "$root/path.XXXXXX")
+			ln -s "$dir"/* "$shadow/"
+			rm -f "$shadow/claude" "$shadow/codex"
+			dir=$shadow
+		fi
+		path="$path:$dir"
+	done < <(tr ':' '\n' <<<"$PATH")
 	cat >"$root/bin/agent" <<'EOF'
 #!/usr/bin/env bash
 [[ $* != --version ]] || exec echo "${0##*/} 1.2.3"
@@ -490,16 +512,25 @@ EOF
 		return 1
 	fi
 	[[ -s $root/npx.log ]]
-	[[ $(grep -Fvc -- '--global' "$root/npx.log") == 0 ]]
-	[[ $(grep -Fv context-handoff "$root/npx.log" | grep -Fvc -- '--agent codex claude-code') == 0 ]]
+	if grep -Fqv -- '--global' "$root/npx.log"; then
+		return 1
+	fi
+	if grep -Fv context-handoff "$root/npx.log" | grep -Fqv -- '--agent codex claude-code'; then
+		return 1
+	fi
 	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
 	# Every skill source is pinned to a commit.
-	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
+	if grep -Eqv -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log"; then
+		return 1
+	fi
 	grep -Fq 'sudo env apt-get -o DPkg::Lock::Timeout=300 install -y -qq claude-code' "$root/agents.log"
 	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
-	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 11 ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 11 ]]
+	grep -Fq 'claude plugin install superpowers@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install frontend-design@claude-plugins-official --yes' "$root/agents.log"
+	grep -Fq 'claude plugin install claude-code-setup@claude-plugins-official --yes' "$root/agents.log"
+	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 13 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 13 ]]
 	settings="$root/home/.claude/settings.json"
 	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],0,1]' ]]
 	# Claude Code's own setting keeps Co-Authored-By out of commits.
@@ -556,11 +587,13 @@ EOF
 	if cat - "$root/agents.log" "$root/npx.log" <<<"$output" | grep -Eiq 'codex|context-handoff'; then
 		return 1
 	fi
-	[[ $(grep -Fvc -- '--agent claude-code' "$root/npx.log") == 0 ]]
+	if grep -Fqv -- '--agent claude-code' "$root/npx.log"; then
+		return 1
+	fi
 	[[ ! -e $root/home/.codex ]]
 	[[ $(head -n 1 "$claude_md") == '# My notes' && $(tail -n 1 "$claude_md") == '# More notes' ]]
 	[[ $(grep -Fcx -- "$begin" "$claude_md") == 1 && $(grep -Fc 'When spawning a subagent' "$claude_md") == 1 ]]
-	[[ $(wc -l <"$claude_md") == 13 ]]
+	[[ $(wc -l <"$claude_md") == 15 ]]
 	if grep -Fq 'stale rule' "$claude_md"; then
 		return 1
 	fi
@@ -588,7 +621,7 @@ EOF
 		return 1
 	fi
 	printf '%s\n' "$begin" '- keep me' >"$root/home/.codex/AGENTS.md"
-	[[ $(wc -l <"$claude_md") == 13 ]]
+	[[ $(wc -l <"$claude_md") == 15 ]]
 	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
 	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
 	if grep -Eq 'Installing or updating (Claude Code|Codex)' <<<"$output"; then
