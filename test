@@ -502,11 +502,17 @@ EOF
 		return 1
 	fi
 	[[ -s $root/npx.log ]]
-	[[ $(grep -Fvc -- '--global' "$root/npx.log") == 0 ]]
-	[[ $(grep -Fv context-handoff "$root/npx.log" | grep -Fvc -- '--agent codex claude-code') == 0 ]]
+	if grep -Fqv -- '--global' "$root/npx.log"; then
+		return 1
+	fi
+	if grep -Fv context-handoff "$root/npx.log" | grep -Fqv -- '--agent codex claude-code'; then
+		return 1
+	fi
 	grep -Eq -- 'context-handoff#[0-9a-f]{40} --global --agent codex --skill' "$root/npx.log"
 	# Every skill source is pinned to a commit.
-	[[ $(grep -Evc -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log") == 0 ]]
+	if grep -Eqv -- '^--yes skills@[0-9]+\.[0-9]+\.[0-9]+ add [^ ]+#[0-9a-f]{40} .* --yes$' "$root/npx.log"; then
+		return 1
+	fi
 	grep -Fq 'sudo env apt-get -o DPkg::Lock::Timeout=300 install -y -qq claude-code' "$root/agents.log"
 	grep -Fq 'claude plugin install gopls-lsp@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install typescript-lsp@claude-plugins-official --yes' "$root/agents.log"
