@@ -54,17 +54,6 @@ fail() {
 	exit 1
 }
 
-# Ask on the terminal. No terminal or LINUX_TOOLBOX_NONINTERACTIVE=1 answers No.
-confirm() {
-	local answer
-	[[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} != 1 ]] || return 1
-	{ exec 3<>/dev/tty; } 2>/dev/null || return 1
-	printf '\n %s[?]%s %s [y/N] ' "$YELLOW" "$RESET" "$1" >&3
-	IFS= read -r answer <&3 || answer=
-	exec 3>&-
-	[[ $answer == [yY] ]]
-}
-
 selected() { [[ " $components " == *" $1 "* ]]; }
 
 # Print "installed", or which of the given commands are missing.
@@ -91,16 +80,42 @@ version_state() {
 	echo "${version:-installed}"
 }
 
+# Set the caller's git_state to the Git identity and GitHub sign-in, and git_ready=1 when both are set.
+read_git_state() {
+	local name email status account signed_in=0
+	command -v git >/dev/null || {
+		git_state='git not installed'
+		return
+	}
+	name=$(git config --global --get user.name || true)
+	email=$(git config --global --get user.email || true)
+	if command -v gh >/dev/null && status=$(gh auth status --hostname github.com 2>&1 </dev/null); then
+		signed_in=1
+		account=$(sed -n 's/.*account \([^ ]*\).*/\1/p' <<<"$status" | head -n 1)
+	fi
+	if [[ -n $name && -n $email ]]; then git_state=$name; else git_state='no identity'; fi
+	if ((! signed_in)); then
+		git_state+=', not signed in to GitHub'
+	elif [[ -n $account ]]; then
+		git_state+=", GitHub $account"
+	else
+		git_state+=', signed in to GitHub'
+	fi
+	[[ -z $name || -z $email ]] || ((! signed_in)) || git_ready=1
+}
+
 # Show every component with its detected state, then read the selection.
 choose_components() {
-	local keys labels states i release=
-	keys=(packages go node shell release claude codex)
+	local keys labels states i release='' git_state='' git_ready=0 interactive=1
+	keys=(packages go node shell release claude codex git)
 	labels=('System packages: git, gh, make, tar' Go 'Node.js LTS through nvm'
-		'Shell tools: jq, ShellCheck, rg, shfmt' 'GitHub release flow' 'Claude Code' 'Codex CLI')
+		'Shell tools: jq, ShellCheck, rg, shfmt' 'GitHub release flow' 'Claude Code' 'Codex CLI'
+		'Git identity and GitHub sign-in')
 	# 'gh extension list' needs a login; the extension's own help does not.
 	if command -v gh >/dev/null && gh release-flow --help >/dev/null 2>&1 </dev/null; then
 		release=installed
 	fi
+	read_git_state
 	# GOTOOLCHAIN=local: show the installed Go, not a toolchain that a project in this folder asks for.
 	states=(
 		"$(installed_state git gh make tar)"
@@ -110,6 +125,7 @@ choose_components() {
 		"${release:-not installed}"
 		"$(version_state claude --version)"
 		"$(version_state codex --version)"
+		"$git_state"
 	)
 	if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
 		keys+=(cleanup)
@@ -121,8 +137,13 @@ choose_components() {
 		picked[i]=1
 	done
 	[[ ${keys[count - 1]} != cleanup ]] || picked[count - 1]=0
-
 	if [[ ${LINUX_TOOLBOX_NONINTERACTIVE:-0} == 1 ]] || ! { exec 3<>/dev/tty; } 2>/dev/null; then
+		interactive=0
+	fi
+	# Git setup asks on the terminal, so it starts checked only when something is missing and someone can answer.
+	((interactive && ! git_ready)) || picked[7]=0
+
+	if ((! interactive)); then
 		printf '\n %s[?]%s Components to install or update:\n' "$YELLOW" "$RESET"
 		for i in "${!keys[@]}"; do
 			printf '     %s %d) %-47s %s%s%s\n' "$( ((picked[i])) && echo '[x]' || echo '[ ]')" \
@@ -307,42 +328,22 @@ if selected release; then
 fi
 ok "All installed commands are available"
 
-git_setup=
-identity_prompt="Set up your Git identity now?"
-if command -v git >/dev/null; then
-	name=$(git config --global --get user.name || true)
-	email=$(git config --global --get user.email || true)
-	if [[ -n $name$email ]]; then
-		identity_prompt="Git identity is already set to ${name:-no name}${email:+ <$email>}. Change it?"
-	fi
-fi
-if confirm "$identity_prompt"; then
+if selected git; then
+	git_setup=$(load_script setup-git.sh)
 	step "Git identity"
-	git_setup=${git_setup:-$(load_script setup-git.sh)}
 	if bash -c "$git_setup" -- identity </dev/tty; then
 		ok "Git identity configured"
 	else
 		notice "Git identity was not changed"
 	fi
-else
-	notice "Git identity setup skipped"
-fi
-
-github_prompt="Set up GitHub authentication now?"
-if command -v gh >/dev/null && auth_status=$(gh auth status --hostname github.com 2>&1); then
-	account=$(sed -n 's/.*account \([^ ]*\).*/\1/p' <<<"$auth_status" | head -n 1)
-	github_prompt="GitHub CLI is already authenticated${account:+ as $account}. Re-run setup? This reconfigures Git's credential helper for github.com."
-fi
-if confirm "$github_prompt"; then
 	step "GitHub authentication"
-	git_setup=${git_setup:-$(load_script setup-git.sh)}
 	if bash -c "$git_setup" -- github </dev/tty; then
 		ok "GitHub authentication configured"
 	else
 		notice "GitHub authentication was not changed"
 	fi
 else
-	notice "GitHub authentication setup skipped"
+	notice "Git and GitHub setup skipped"
 fi
 
 # ~/.profile adds ~/.local/bin only when it existed at login, so new terminals would miss these tools.

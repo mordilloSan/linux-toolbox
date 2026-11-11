@@ -43,10 +43,11 @@ The installer asks for `sudo` before making system changes. It starts with a men
      [x] 5) GitHub release flow                             not installed
      [x] 6) Claude Code                                     2.1.296 (Claude Code)
      [x] 7) Codex CLI                                       not installed
-     [ ] 8) Ubuntu cleanup: remove Snaps and all Snap data   Snap present
+     [ ] 8) Git identity and GitHub sign-in                 Jane Doe, GitHub janedoe
+     [ ] 9) Ubuntu cleanup: remove Snaps and all Snap data  Snap present
 ```
 
-Components 1 to 7 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it. Enter installs the checked items. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection.
+Components 1 to 7 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it. Enter installs the checked items. Git setup starts checked only when the Git name or email is missing or the GitHub CLI is not signed in; when checked, it runs both parts of [Git and GitHub setup](#git-and-github-setup) after the installs. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection, with Git setup unchecked.
 
 Installed components are updated in place. Before a step replaces something you may have set up yourself, it asks first, and the default answer keeps what you have:
 
@@ -57,8 +58,6 @@ Installed components are updated in place. Before a step replaces something you 
 | Node.js | Installing next to a Node.js that nvm does not manage (one without `npx`, or older than 22.20, is not kept), or changing a custom nvm default |
 | Shell tools | Adding a copy in `~/.local/bin` when the tool already exists elsewhere (a Snap copy does not count) |
 | Release flow | Replacing a `~/.config/make/release-flow.mk` that has different content |
-| Git identity | Changing an identity that is already set |
-| GitHub | Re-running setup when the GitHub CLI is already authenticated |
 
 To review the entrypoint first:
 
@@ -80,7 +79,7 @@ LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 bash install.sh
 
 Without this option, each run adds back those git rules if you removed them.
 
-Skip the menu and the installer's own questions (sudo may still ask for your password; with no terminal it needs passwordless or recently cached sudo). This installs or updates components 1 to 7, keeps anything you set up yourself, and skips the Ubuntu cleanup:
+Skip the menu and the installer's own questions (sudo may still ask for your password; with no terminal it needs passwordless or recently cached sudo). This installs or updates components 1 to 7, keeps anything you set up yourself, and skips Git setup and the Ubuntu cleanup:
 
 ```bash
 LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh

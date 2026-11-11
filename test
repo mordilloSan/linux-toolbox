@@ -41,11 +41,21 @@ EOF
 	output=$(MOCK_CURL_LOG="$root/remote" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash <install.sh)
 	grep -Fq 'Setup complete' <<<"$output"
-	grep -Fq 'Git identity setup skipped' <<<"$output"
-	grep -Fq 'GitHub authentication setup skipped' <<<"$output"
+	# Without a terminal the Git item starts unchecked, since its setup asks questions.
+	grep -Eq '\[ \] 8\) Git identity and GitHub sign-in .*no identity, signed in to GitHub' <<<"$output"
+	grep -Fq 'Git and GitHub setup skipped' <<<"$output"
 	grep -Fq 'Open a new terminal' <<<"$output"
 	grep -Fq 'gopls installed' <<<"$output"
 	diff -u "$root/expected" "$root/remote"
+
+	# On a terminal, Enter accepts the menu as shown. With no Git identity the Git item starts
+	# checked and runs both Git steps.
+	output=$(printf '\n' | MOCK_CURL_LOG="$root/interactive" PATH="$root/bin:$PATH" HOME="$root/home" \
+		timeout 20 script -qfec 'bash <install.sh' /dev/null)
+	grep -Fq '8) Git identity and GitHub sign-in' <<<"$output"
+	grep -Fq 'Git identity configured' <<<"$output"
+	grep -Fq 'GitHub authentication configured' <<<"$output"
+	diff -u <(cat "$root/expected" && echo setup-git.sh) "$root/interactive"
 
 	# A failed download stops the run with a FAILED line, before any later step.
 	if output=$(MOCK_CURL_FAIL=install-node.sh MOCK_CURL_LOG="$root/failed" PATH="$root/bin:$PATH" \
@@ -75,7 +85,7 @@ EOF
 	MOCK_CURL_LOG="$root/pinned" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
 	diff -u "$root/expected" "$root/pinned"
-	pass 'installer uses remote scripts when piped or pinned, and local scripts from a checkout'
+	pass 'installer uses remote scripts when piped or pinned, local scripts from a checkout, and runs Git setup only when checked'
 }
 
 test_node_installer() {
