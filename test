@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
+# Most checks are bare commands that stop the run under set -e, so say which one failed.
+trap 'printf "not ok - %s, line %s: %s\n" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # Keep the developer's own settings out of the checks. Under make test, the make variables would
 # turn the tests' own make runs into sub-makes that print "Entering directory".
 unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME MAKELEVEL MAKEFLAGS MFLAGS "${!LINUX_TOOLBOX_@}"
@@ -569,7 +571,9 @@ EOF
 	if cat - "$root/agents.log" "$root/npx.log" <<<"$output" | grep -Eiq 'codex|context-handoff'; then
 		return 1
 	fi
-	[[ $(grep -Fvc -- '--agent claude-code' "$root/npx.log") == 0 ]]
+	if grep -Fqv -- '--agent claude-code' "$root/npx.log"; then
+		return 1
+	fi
 	[[ ! -e $root/home/.codex ]]
 	[[ $(head -n 1 "$claude_md") == '# My notes' && $(tail -n 1 "$claude_md") == '# More notes' ]]
 	[[ $(grep -Fcx -- "$begin" "$claude_md") == 1 && $(grep -Fc 'When spawning a subagent' "$claude_md") == 1 ]]
