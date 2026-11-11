@@ -207,12 +207,12 @@ if selected codex; then
 fi
 
 if selected claude; then
-	info "Installing the Go and TypeScript language server plugins..."
+	info "Installing the Claude Code plugins..."
 	# Anthropic's official marketplace; Claude Code normally has it already.
 	claude plugin marketplace update claude-plugins-official >/dev/null 2>&1 ||
 		run_quiet claude plugin marketplace add anthropics/claude-plugins-official
-	# They run gopls and typescript-language-server, which the Go and Node.js steps install.
-	for plugin in gopls-lsp typescript-lsp; do
+	# The two LSP plugins run gopls and typescript-language-server, which the Go and Node.js steps install.
+	for plugin in gopls-lsp typescript-lsp superpowers frontend-design claude-code-setup; do
 		run_quiet claude plugin install "$plugin@claude-plugins-official" --yes
 		ok "$plugin installed"
 	done
