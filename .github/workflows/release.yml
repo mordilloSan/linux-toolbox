@@ -56,4 +56,5 @@ jobs:
           [[ "$RELEASE_TAG" == *-* ]] && release_args+=(--prerelease)
           # The release PR body holds the grouped changelog written by gh-release-flow open-pr.
           if [[ -n $PR_BODY ]]; then release_args+=(--notes "$PR_BODY"); else release_args+=(--generate-notes); fi
-          gh release create "$RELEASE_TAG" dist/*.sh --target "$MERGE_SHA" "${release_args[@]}"
+          # Without --title, a release with --notes has no name; name it after its tag.
+          gh release create "$RELEASE_TAG" dist/*.sh --title "$RELEASE_TAG" --target "$MERGE_SHA" "${release_args[@]}"
