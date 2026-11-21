@@ -41,7 +41,7 @@ The installer asks for `sudo` before making system changes. It starts with a men
      [x]  3) Node.js LTS through nvm                         v24.21.0
      [x]  4) Shell tools: jq, ShellCheck, rg, shfmt          installed
      [x]  5) GitHub release flow                             not installed
-     [x]  6) Claude Code                                     2.1.296 (Claude Code)
+     [x]  6) Claude Code                                     2.1.296
      [x]  7) Codex CLI                                       not installed
      [x]  8) AI setup: skills, plugins, guidance, guardrails to update: skills, guidance
      [ ]  9) Git identity and GitHub sign-in                 Jane Doe, GitHub janedoe

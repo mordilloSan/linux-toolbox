@@ -127,14 +127,15 @@ choose_components() {
 	fi
 	read_git_state
 	# GOTOOLCHAIN=local: show the installed Go, not a toolchain that a project in this folder asks for.
+	# The agents print their name around the version; the label already says it.
 	states=(
 		"$(installed_state git gh make tar)"
 		"$(GOTOOLCHAIN=local version_state go env GOVERSION)"
 		"$(version_state node --version)"
 		"$(installed_state jq shellcheck shfmt rg actionlint)"
 		"${release:-not installed}"
-		"$(version_state claude --version)"
-		"$(version_state codex --version)"
+		"$(version_state claude --version | sed 's/ (Claude Code)$//')"
+		"$(version_state codex --version | sed 's/^codex-cli //')"
 		"$ai_state"
 		"$git_state"
 	)
