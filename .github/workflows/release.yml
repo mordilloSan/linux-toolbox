@@ -54,6 +54,8 @@ jobs:
           cp -- *.sh dist/
           sed -i "s#^base_url=.*#base_url=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}#" dist/install.sh
           grep -Fx "base_url=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}" dist/install.sh
+          # Lets a download be checked with: sha256sum -c --ignore-missing SHA256SUMS
+          (cd dist && sha256sum -- *.sh >SHA256SUMS)
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,4 +67,4 @@ jobs:
           # The release PR body holds the grouped changelog written by gh-release-flow open-pr.
           if [[ -n $PR_BODY ]]; then release_args+=(--notes "$PR_BODY"); else release_args+=(--generate-notes); fi
           # Without --title, a release with --notes has no name; name it after its tag.
-          gh release create "$RELEASE_TAG" dist/*.sh --title "$RELEASE_TAG" --target "$MERGE_SHA" "${release_args[@]}"
+          gh release create "$RELEASE_TAG" dist/*.sh dist/SHA256SUMS --title "$RELEASE_TAG" --target "$MERGE_SHA" "${release_args[@]}"
