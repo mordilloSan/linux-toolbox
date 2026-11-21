@@ -2,17 +2,24 @@
 set -Eeuo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+# The installer's status tags, coloured only on a terminal and never with NO_COLOR set.
+if [[ -t 1 && -z ${NO_COLOR-} ]]; then
+	ok_tag=$'\033[90m[\033[38;5;154m  OK  \033[90m]\033[0m'
+	fail_tag=$'\033[90m[\033[91mFAILED\033[90m]\033[0m'
+else
+	ok_tag='[  OK  ]' fail_tag='[FAILED]'
+fi
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 # Most checks are bare commands that stop the run under set -e, so say which one failed.
-trap 'printf "not ok - %s, line %s: %s\n" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+trap 'printf " %s %s, line %s: %s\n" "$fail_tag" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # Keep the developer's own settings out of the checks. Under make test, the make variables would
 # turn the tests' own make runs into sub-makes that print "Entering directory".
 unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME MAKELEVEL MAKEFLAGS MFLAGS "${!LINUX_TOOLBOX_@}"
 : >"$test_dir/.shellcheckrc"
 
 pass() {
-	printf 'ok - %s\n' "$1"
+	printf ' %s %s\n' "$ok_tag" "$1"
 }
 
 test_installer_orchestration() {
@@ -85,7 +92,7 @@ EOF
 	MOCK_CURL_LOG="$root/pinned" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
 	diff -u "$root/expected" "$root/pinned"
-	pass 'installer uses remote scripts when piped or pinned, local scripts from a checkout, and runs Git setup only when checked'
+	pass 'installer: script sources and Git setup selection'
 }
 
 test_node_installer() {
@@ -159,7 +166,7 @@ EOF
 			grep -Fq 'install --lts' "$home/.nvm/calls"
 		fi
 	done
-	pass 'Node installer selects LTS quietly, keeps a custom nvm default unless confirmed, and replaces a Node.js it cannot use'
+	pass 'Node: LTS install, nvm default, unusable Node replaced'
 }
 
 test_dependency_output() (
@@ -207,7 +214,7 @@ test_dependency_output() (
 	[[ $PKG_MGR == dnf ]]
 	pkg_install make >/dev/null
 	[[ $(tail -n 1 "$log") == 'dnf install -y -q --best make' ]]
-	pass 'system dependencies report each package, hide successful manager output, wait for the apt lock, and use dnf on RHEL'
+	pass 'system packages: per-package report, apt lock wait, dnf'
 )
 
 test_go_installer() {
@@ -267,7 +274,7 @@ EOF
 	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
 	grep -Fq 'Kept the existing Go setup' <<<"$output"
 	[[ ! -e $root/usr/local/bin/go ]]
-	pass 'Go installer links the latest Go and keeps a Go the user installed'
+	pass 'Go: latest linked, user install kept'
 }
 
 test_shell_tools() {
@@ -332,7 +339,7 @@ EOF
 			bash install-shell-tools.sh >/dev/null 2>&1 || status=$?
 		[[ $status != 0 && ! -e $root/bad/${command%%[-_]*} ]]
 	done
-	pass 'shell tools install from GitHub releases and reject a download that fails its checksum'
+	pass 'shell tools: GitHub releases, checksum enforced'
 }
 
 test_ubuntu_cleanup() {
@@ -378,7 +385,7 @@ EOF
 	# Names dpkg does not know (gnome-software-plugin-snap here) are left out instead of failing the purge.
 	grep -Fqx 'apt-get -o DPkg::Lock::Timeout=300 purge -y snapd apport multipath-tools kdump-tools landscape-common' "$root/log"
 	[[ -e $fs/etc/apt/preferences.d/nosnap.pref && -e $fs/etc/cloud/cloud-init.disabled ]]
-	pass 'Ubuntu cleanup removes only snap folders, guards WSL packages, and pins snapd away'
+	pass 'Ubuntu cleanup: snap folders, WSL guard, snapd pin'
 }
 
 test_release_flow() {
@@ -442,7 +449,7 @@ EOF
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
 	grep -Fq 'skipped the Make targets' <<<"$output"
 	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
-	pass 'release-flow installer installs or upgrades the extension, runs setup-make, notices once, replaces its old targets, and keeps a custom Make file'
+	pass 'release-flow: extension, Make targets, custom file kept'
 }
 
 test_ai_tools() {
@@ -567,7 +574,7 @@ EOF
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude 2>&1)
 	grep -Fq 'settings.json is not valid JSON; Claude Code settings left unchanged' <<<"$output"
 	[[ $(<"$settings") == 'not json' ]]
-	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
+	pass 'AI tools: theme, global install, guidance, settings'
 
 	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log" "$root/bin/claude"
 	mkdir -p "$root/home/.claude"
@@ -668,7 +675,7 @@ EOF
 	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh >/dev/null
 	[[ ! -e $root/home/.claude && ! -e $root/home/.codex ]]
-	pass 'AI tools install only the selected agent and skip it when up to date'
+	pass 'AI tools: selected agent only, skipped when current'
 }
 
 test_git_setup_modes() {
@@ -700,15 +707,13 @@ EOF
 	if grep -Fq 'git config --global user.' "$root/github.log"; then
 		return 1
 	fi
-	pass 'Git identity and GitHub authentication run independently'
+	pass 'Git setup: identity and GitHub auth independent'
 }
 
-test_installer_orchestration
-test_node_installer
-test_dependency_output
-test_go_installer
-test_shell_tools
-test_ubuntu_cleanup
-test_release_flow
-test_ai_tools
-test_git_setup_modes
+tests=(test_installer_orchestration test_node_installer test_dependency_output test_go_installer test_shell_tools
+	test_ubuntu_cleanup test_release_flow test_ai_tools test_git_setup_modes)
+for run in "${tests[@]}"; do
+	"$run"
+done
+# A failed check stops the run, so reaching this line means every pass line above was printed.
+printf '\n %s passed in %ss\n' "$(grep -c "^[[:space:]]*pass '" "${BASH_SOURCE[0]}")" "$SECONDS"
