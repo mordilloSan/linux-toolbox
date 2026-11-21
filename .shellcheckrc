@@ -1,0 +1,2 @@
+# Follow the "source=" directives, so a script checked on its own resolves what it sources.
+external-sources=true
