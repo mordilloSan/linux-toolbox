@@ -271,7 +271,9 @@ if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 			- To read code, locate it with `rg -n` and read only the relevant line range; don't `cat` whole files or several files at once, since everything read stays in context for the rest of the session.
 			- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.
 			- Before a multi-agent run, say which model plans, builds and reviews, and give risky code to a stronger model.
-			- When asked a question, answer it; don't build or change anything until asked to.
+			- When asked a question, including "can we X?" or "how can I X?", answer it in detail; read-only investigation is fine, but don't build or change anything until asked to.
+			- When the user dislikes or complains about a design choice, lay out the alternatives with their trade-offs and a recommendation, and change nothing until they pick one.
+			- Before recommending an option, state each option's rough size: how many files it touches including tests and docs, which layers or components, and any new privileged or public surface. Name the cheap option as cheap, and keep a refactor that a review suggests out of the change unless asked.
 			- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, each paragraph on one unwrapped line, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
 			- Never read, print, or commit secrets such as `.env` files, tokens, or private keys; refer to them by name.
 			- In repositories with `dev/vX.Y.Z` release branches, releases go through gh-release-flow (`gh release-flow start-dev vX.Y.Z`, `open-pr`, `merge`); never create tags or GitHub Releases by hand, and merge only when asked.
@@ -351,14 +353,15 @@ exit 2
 EOF
 	[[ -s $settings ]] || printf '{}\n' >"$settings"
 	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
-	# attribution.commit "" stops Claude Code adding Co-Authored-By; the removal keeps dropping the older guard hook.
+	# attribution.commit "" stops Claude Code adding Co-Authored-By and attribution.pr "" its pull request footer;
+	# the removal keeps dropping the older guard hook.
 	# jq reads the file from a pipe, which a sandboxed Snap jq can do even though it cannot open home files.
 	if updated=$(jq --arg lint "bash $(printf %q "$lint_hook")" '
 		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
 		def without_ours: [(. // [])[] | del(.hooks[]? | select((.command // "") | test("/hooks/linux-toolbox-lint\\.sh|linux-toolbox: commits"))) | select(.hooks != [])];
 		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
 		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
-		| if .attribution == false then . else .attribution.commit //= "" | if .includeCoAuthoredBy == false then .attribution.pr //= "" else . end end
+		| if .attribution == false then . else .attribution.commit //= "" | .attribution.pr //= "" end
 		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours)
 		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
 	' < <(cat -- "$settings") 2>/dev/null) && [[ -n $updated ]]; then
