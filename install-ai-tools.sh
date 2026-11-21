@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Install Codex, Claude Code, and shared skills for the current user.
-# Usage: install-ai-tools.sh [claude] [codex]   (no arguments installs both)
+# Usage: install-ai-tools.sh [--cli | --setup | --status] [claude] [codex]   (no agent means both)
+#   no option  install the agents, then their skills, plugins, guidance and Claude Code settings
+#   --cli      install or update only the agents
+#   --setup    only the skills, plugins, guidance and settings, for agents that are already installed
+#   --status   print in one line whether that setup is current; changes nothing
 set -euo pipefail
 
 if [[ $EUID -eq 0 ]]; then
@@ -38,6 +42,13 @@ run_installer() {
 	fi
 }
 
+mode=all
+case ${1:-} in
+--cli | --setup | --status)
+	mode=${1#--}
+	shift
+	;;
+esac
 agents=("$@")
 ((${#agents[@]})) || agents=(claude codex)
 for agent in "${agents[@]}"; do
@@ -54,6 +65,183 @@ export PATH="$HOME/.local/bin:$PATH"
 cd "$HOME" 2>/dev/null || cd /
 claude_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 codex_dir=${CODEX_HOME:-$HOME/.codex}
+
+# What the setup installs. --status compares the machine with these, so they are defined before any step runs.
+plugins=(gopls-lsp typescript-lsp superpowers frontend-design claude-code-setup)
+interface_skills=(
+	better-accessibility better-colors better-interface better-layout
+	better-typography better-ui better-writing break explain-interface
+	interface-review variant
+)
+# The skills CLI version and skill sources (#sha) are pinned; bump both after reading the upstream changes.
+# The skills CLI reports installs to skills.sh unless this is set.
+go_skills=(
+	golang-concurrency golang-context golang-error-handling golang-lint golang-modernize
+	golang-security golang-stretchr-testify golang-testing golang-troubleshooting
+)
+interface_source=jakubkrehel/skills#157da62016338e8693dcff93d47154a9e36f2157
+find_skills_source=vercel-labs/skills#d3701c11b1101251af14c9d148f026e1a47ebe17
+handoff_source=timyeou1234/context-handoff#00f4ad1af40ecdcd3bad1c7c9a31423b0fa1b272
+go_source=samber/cc-skills-golang#bb1d43d98a3f8ab639a0042f90d0ec524e39a477
+# Never change the markers: older blocks are found by them and replaced whole on every run.
+guidance_begin='<!-- linux-toolbox guidance: managed by install-ai-tools.sh, edits inside are replaced -->'
+guidance_end='<!-- end linux-toolbox guidance -->'
+guidance_rules=$(
+	cat <<-'EOF'
+		- For shell-script work, use `shellcheck <files> && shfmt -d <files>` for validation; target relevant files instead of reading every script just to check it.
+		- For JSON, especially `gh api` output, use `jq` or `gh --jq` to extract only the fields needed instead of loading raw JSON.
+		- For codebase searches, use `rg <pattern>` and `rg --files` to narrow the relevant files instead of reading directories or whole files.
+		- For GitHub Actions workflows, run `actionlint` after changes.
+		- To read code, locate it with `rg -n` and read only the relevant line range; don't `cat` whole files or several files at once, since everything read stays in context for the rest of the session.
+		- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.
+		- Before a multi-agent run, say which model plans, builds and reviews, and give risky code to a stronger model.
+		- When asked a question, including "can we X?" or "how can I X?", answer it in detail; read-only investigation is fine, but don't build or change anything until asked to.
+		- When the user dislikes or complains about a design choice, lay out the alternatives with their trade-offs and a recommendation, and change nothing until they pick one.
+		- Before recommending an option, state each option's rough size: how many files it touches including tests and docs, which layers or components, and any new privileged or public surface. Name the cheap option as cheap, and keep a refactor that a review suggests out of the change unless asked.
+		- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, each paragraph on one unwrapped line, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
+		- Never read, print, or commit secrets such as `.env` files, tokens, or private keys; refer to them by name.
+		- In repositories with `dev/vX.Y.Z` release branches, releases go through gh-release-flow (`gh release-flow start-dev vX.Y.Z`, `open-pr`, `merge`); never create tags or GitHub Releases by hand, and merge only when asked.
+	EOF
+)
+guidance_files=()
+! selected codex || guidance_files+=("$codex_dir/AGENTS.md")
+! selected claude || guidance_files+=("$claude_dir/CLAUDE.md")
+settings="$claude_dir/settings.json"
+lint_hook="$claude_dir/hooks/linux-toolbox-lint.sh"
+lint_hook_text=$(
+	cat <<'EOF'
+#!/usr/bin/env bash
+# Installed by linux-toolbox: lints the file Claude Code just edited.
+# Findings go to stderr with exit 2, which Claude reads; a missing tool or any other problem exits 0.
+file=$(jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
+[[ -f $file ]] || exit 0
+lint_shell() {
+	# SC1071: a .sh file for a shell ShellCheck cannot read, such as zsh.
+	! command -v shellcheck >/dev/null || shellcheck -e SC1091,SC1071 -- "$1"
+}
+case $file in
+*/.github/workflows/*.yml | */.github/workflows/*.yaml)
+	command -v actionlint >/dev/null || exit 0
+	# actionlint exits 1 for findings; other codes are its own errors.
+	findings=$(actionlint -no-color "$file" 2>&1) || [[ $? == 1 ]] || exit 0
+	;;
+*.sh | *.bash) findings=$(lint_shell "$file" 2>&1) ;;
+*)
+	head -n 1 -- "$file" | grep -Eq '^#!.*\b(ba|da)?sh\b' || exit 0
+	findings=$(lint_shell "$file" 2>&1)
+	;;
+esac
+[[ -n $findings ]] || exit 0
+printf 'linux-toolbox lint: fix these findings in %s\n%s\n' "$file" "$findings" >&2
+exit 2
+EOF
+)
+
+# Print a guidance file as it should be: the block replaced in place or appended, and loose copies of
+# its rules left by older installers dropped. Fails when a start marker has no end marker.
+guidance_content() {
+	local file=$1
+	# Both awk passes drop Windows line endings first, so markers in a CRLF file still match.
+	# A start marker not closed by a later end marker would make the rewrite drop the rest of the file.
+	GUIDANCE_BEGIN=$guidance_begin GUIDANCE_END=$guidance_end awk '
+		{ sub(/\r$/, "") }
+		$0 == ENVIRON["GUIDANCE_BEGIN"] { open = 1 }
+		$0 == ENVIRON["GUIDANCE_END"] { open = 0 }
+		END { exit open }
+	' < <(cat -- "$file" 2>/dev/null) || return 1
+	GUIDANCE_BEGIN=$guidance_begin GUIDANCE_END=$guidance_end GUIDANCE_RULES=$guidance_rules awk '
+		function block() {
+			print ENVIRON["GUIDANCE_BEGIN"]
+			for (i = 1; i <= n; i++) print rules[i]
+			print ENVIRON["GUIDANCE_END"]
+			done = 1
+		}
+		BEGIN {
+			n = split(ENVIRON["GUIDANCE_RULES"], rules, "\n")
+			for (i = 1; i <= n; i++) managed[rules[i]]
+		}
+		{ sub(/\r$/, "") }
+		$0 == ENVIRON["GUIDANCE_BEGIN"] { skip = 1; if (!done) block(); next }
+		skip { if ($0 == ENVIRON["GUIDANCE_END"]) skip = 0; next }
+		$0 in managed { next }
+		{ print; last = $0; printed = 1 }
+		END { if (!done) { if (printed && last != "") print ""; block() } }
+	' < <(cat -- "$file" 2>/dev/null)
+}
+
+# Print the Claude Code settings as they should be. Fails when the file is not valid JSON.
+# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
+# attribution.commit "" stops Claude Code adding Co-Authored-By and attribution.pr "" its pull request footer;
+# the removal keeps dropping the older guard hook.
+# jq reads the file from a pipe, which a sandboxed Snap jq can do even though it cannot open home files.
+settings_content() {
+	jq --arg lint "bash $(printf %q "$lint_hook")" '
+		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
+		def without_ours: [(. // [])[] | del(.hooks[]? | select((.command // "") | test("/hooks/linux-toolbox-lint\\.sh|linux-toolbox: commits"))) | select(.hooks != [])];
+		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
+		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
+		| if .attribution == false then . else .attribution.commit //= "" | .attribution.pr //= "" end
+		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours)
+		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
+	' < <(cat -- "$settings" 2>/dev/null) 2>/dev/null
+}
+
+# Succeeds when the skills lock file records every named skill at the commit of its source (repo#sha).
+skills_at() {
+	local ref=${1#*#}
+	shift
+	jq -e --arg ref "$ref" '. as $lock | all($ARGS.positional[]; $lock.skills[.].ref == $ref)' --args "$@" \
+		< <(cat -- "$skill_lock" 2>/dev/null) >/dev/null 2>&1
+}
+
+# Say in one line which parts of the setup differ from what this script installs. Changes nothing.
+# Plugins are not pinned, so they count as current once installed.
+print_status() {
+	local stale='' file want skill_lock=${XDG_STATE_HOME:+$XDG_STATE_HOME/skills}
+	skill_lock=${skill_lock:-$HOME/.agents}/.skill-lock.json
+	command -v jq >/dev/null || {
+		echo unknown
+		return
+	}
+	if ! skills_at "$interface_source" "${interface_skills[@]}" || ! skills_at "$find_skills_source" find-skills ||
+		! skills_at "$go_source" "${go_skills[@]}" ||
+		{ selected codex && ! skills_at "$handoff_source" context-handoff; }; then
+		stale+=', skills'
+	fi
+	if selected claude && ! jq -e '. as $all | all($ARGS.positional[]; ($all.plugins["\(.)@claude-plugins-official"] // []) | length > 0)' \
+		--args "${plugins[@]}" < <(cat -- "$claude_dir/plugins/installed_plugins.json" 2>/dev/null) >/dev/null 2>&1; then
+		stale+=', plugins'
+	fi
+	if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
+		for file in "${guidance_files[@]}"; do
+			# A file with an unclosed marker is left alone by the setup, so it is not reported either.
+			if want=$(guidance_content "$file") && [[ $want != "$(cat -- "$file" 2>/dev/null)" ]]; then
+				stale+=', guidance'
+				break
+			fi
+		done
+		if selected claude; then
+			# Settings that are not valid JSON are left alone by the setup too.
+			if [[ $(cat -- "$lint_hook" 2>/dev/null) != "$lint_hook_text" ]]; then
+				stale+=', guardrails'
+			elif want=$(settings_content) &&
+				[[ -z $want || $(jq -c . <<<"$want") != "$(jq -c . < <(cat -- "$settings" 2>/dev/null) 2>/dev/null)" ]]; then
+				stale+=', guardrails'
+			fi
+		fi
+	fi
+	if [[ -n $stale ]]; then
+		printf 'to update: %s\n' "${stale#, }"
+	else
+		echo current
+	fi
+}
+
+if [[ $mode == status ]]; then
+	print_status
+	exit 0
+fi
+
 for command in curl jq npx; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required. Run the complete installer first." >&2
@@ -72,28 +260,30 @@ root_env=()
 for var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
 	[[ -z ${!var:-} ]] || root_env+=("$var=${!var}")
 done
-# Claude Code's sandbox needs both bubblewrap and socat on Linux.
-info "Installing or updating bubblewrap and socat..."
-if ! command -v bwrap >/dev/null || ! command -v socat >/dev/null; then
-	command -v sudo >/dev/null || {
-		echo "sudo is required to install bubblewrap and socat." >&2
-		exit 1
-	}
-	if [[ $pkg_manager == apt ]]; then
-		run_quiet sudo env "${root_env[@]}" apt-get -o DPkg::Lock::Timeout=300 install -y -qq bubblewrap socat
-	elif [[ $pkg_manager == dnf ]]; then
-		run_quiet sudo env "${root_env[@]}" dnf install -y -q bubblewrap socat
-	else
-		echo "Install bubblewrap and socat with your system package manager." >&2
-		exit 1
+if [[ $mode != setup ]]; then
+	# Claude Code's sandbox needs both bubblewrap and socat on Linux.
+	info "Installing or updating bubblewrap and socat..."
+	if ! command -v bwrap >/dev/null || ! command -v socat >/dev/null; then
+		command -v sudo >/dev/null || {
+			echo "sudo is required to install bubblewrap and socat." >&2
+			exit 1
+		}
+		if [[ $pkg_manager == apt ]]; then
+			run_quiet sudo env "${root_env[@]}" apt-get -o DPkg::Lock::Timeout=300 install -y -qq bubblewrap socat
+		elif [[ $pkg_manager == dnf ]]; then
+			run_quiet sudo env "${root_env[@]}" dnf install -y -q bubblewrap socat
+		else
+			echo "Install bubblewrap and socat with your system package manager." >&2
+			exit 1
+		fi
 	fi
+	# Ubuntu 23.10+ blocks unprivileged user namespaces, and bwrap then needs an AppArmor profile.
+	if [[ $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null) == 1 ]] &&
+		! bwrap --unshare-user --unshare-net --dev-bind / / true 2>/dev/null; then
+		printf ' [NOTICE] AppArmor blocks bubblewrap, so the agent sandbox is off. See https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap\n' >&2
+	fi
+	ok "bubblewrap and socat installed"
 fi
-# Ubuntu 23.10+ blocks unprivileged user namespaces, and bwrap then needs an AppArmor profile.
-if [[ $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null) == 1 ]] &&
-	! bwrap --unshare-user --unshare-net --dev-bind / / true 2>/dev/null; then
-	printf ' [NOTICE] AppArmor blocks bubblewrap, so the agent sandbox is off. See https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap\n' >&2
-fi
-ok "bubblewrap and socat installed"
 
 # Print a command's version number, or nothing when it is missing.
 version_of() {
@@ -181,8 +371,7 @@ install_claude_package() {
 	fi
 }
 
-skill_agents=()
-if selected claude; then
+if [[ $mode != setup ]] && selected claude; then
 	# Users on the stable channel run a release about a week behind 'latest'; compare with their channel.
 	case $(jq -r '.autoUpdatesChannel // empty' "$claude_dir/settings.json" 2>/dev/null) in
 	stable | rc) channel=stable ;;
@@ -196,15 +385,25 @@ if selected claude; then
 	else
 		install_agent 'Claude Code' claude "$latest" run_installer https://claude.ai/install.sh bash
 	fi
-	skill_agents+=(claude-code)
 fi
 
-if selected codex; then
+if [[ $mode != setup ]] && selected codex; then
 	latest=$(curl -fsSL --speed-limit 1 --speed-time 60 https://releases.openai.com/codex/channels/latest 2>/dev/null |
 		sed -n 's/.*"tag_name": *"rust-v\([^"]*\)".*/\1/p' || true)
 	install_agent Codex codex "$latest" run_installer https://chatgpt.com/codex/install.sh env CODEX_NON_INTERACTIVE=1 sh
-	skill_agents=(codex "${skill_agents[@]}")
 fi
+[[ $mode != cli ]] || exit 0
+
+# The setup: skills, plugins, guidance and Claude Code settings.
+skill_agents=()
+! selected codex || skill_agents+=(codex)
+! selected claude || skill_agents+=(claude-code)
+for agent in "${agents[@]}"; do
+	command -v "$agent" >/dev/null || {
+		echo "$agent is not installed. Install it first, or run without --setup." >&2
+		exit 1
+	}
+done
 
 if selected claude; then
 	info "Installing the Claude Code plugins..."
@@ -212,45 +411,35 @@ if selected claude; then
 	claude plugin marketplace update claude-plugins-official >/dev/null 2>&1 ||
 		run_quiet claude plugin marketplace add anthropics/claude-plugins-official
 	# The two LSP plugins run gopls and typescript-language-server, which the Go and Node.js steps install.
-	for plugin in gopls-lsp typescript-lsp superpowers frontend-design claude-code-setup; do
+	for plugin in "${plugins[@]}"; do
 		run_quiet claude plugin install "$plugin@claude-plugins-official" --yes
 		ok "$plugin installed"
 	done
 fi
 
-interface_skills=(
-	better-accessibility better-colors better-interface better-layout
-	better-typography better-ui better-writing break explain-interface
-	interface-review variant
-)
-# The skills CLI version and skill sources (#sha) are pinned; bump both after reading the upstream changes.
 # The skills CLI reports installs to skills.sh unless this is set.
 export DO_NOT_TRACK=1
 info "Installing interface skills..."
-run_quiet npx --yes skills@1.7.6 add jakubkrehel/skills#157da62016338e8693dcff93d47154a9e36f2157 --global \
+run_quiet npx --yes skills@1.7.6 add "$interface_source" --global \
 	--agent "${skill_agents[@]}" --skill "${interface_skills[@]}" --yes
 for skill in "${interface_skills[@]}"; do
 	ok "$skill installed"
 done
 
 info "Installing find-skills..."
-run_quiet npx --yes skills@1.7.6 add vercel-labs/skills#d3701c11b1101251af14c9d148f026e1a47ebe17 --global \
+run_quiet npx --yes skills@1.7.6 add "$find_skills_source" --global \
 	--agent "${skill_agents[@]}" --skill find-skills --yes
 ok "find-skills installed"
 
 if selected codex; then
 	info "Installing context-handoff..."
-	run_quiet npx --yes skills@1.7.6 add timyeou1234/context-handoff#00f4ad1af40ecdcd3bad1c7c9a31423b0fa1b272 --global \
+	run_quiet npx --yes skills@1.7.6 add "$handoff_source" --global \
 		--agent codex --skill context-handoff --yes
 	ok "context-handoff installed"
 fi
 
-go_skills=(
-	golang-concurrency golang-context golang-error-handling golang-lint golang-modernize
-	golang-security golang-stretchr-testify golang-testing golang-troubleshooting
-)
 info "Installing Go skills..."
-run_quiet npx --yes skills@1.7.6 add samber/cc-skills-golang#bb1d43d98a3f8ab639a0042f90d0ec524e39a477 --global \
+run_quiet npx --yes skills@1.7.6 add "$go_source" --global \
 	--agent "${skill_agents[@]}" \
 	--skill "${go_skills[@]}" --yes
 for skill in "${go_skills[@]}"; do
@@ -259,60 +448,12 @@ done
 
 if [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	info "Configuring AI agent guidance..."
-	# Never change the markers: older blocks are found by them and replaced whole on every run.
-	guidance_begin='<!-- linux-toolbox guidance: managed by install-ai-tools.sh, edits inside are replaced -->'
-	guidance_end='<!-- end linux-toolbox guidance -->'
-	guidance_rules=$(
-		cat <<-'EOF'
-			- For shell-script work, use `shellcheck <files> && shfmt -d <files>` for validation; target relevant files instead of reading every script just to check it.
-			- For JSON, especially `gh api` output, use `jq` or `gh --jq` to extract only the fields needed instead of loading raw JSON.
-			- For codebase searches, use `rg <pattern>` and `rg --files` to narrow the relevant files instead of reading directories or whole files.
-			- For GitHub Actions workflows, run `actionlint` after changes.
-			- To read code, locate it with `rg -n` and read only the relevant line range; don't `cat` whole files or several files at once, since everything read stays in context for the rest of the session.
-			- When spawning a subagent, name the exact files or line ranges and one deliverable; do quick lookups inline instead of delegating them.
-			- Before a multi-agent run, say which model plans, builds and reviews, and give risky code to a stronger model.
-			- When asked a question, answer it; don't build or change anything until asked to.
-			- After changing code (not after reviews or questions), end with a suggested commit message in Conventional Commits format (`type(scope): subject`, scope optional; types like feat, fix, docs, refactor, test, chore): an imperative subject of at most 72 characters, a blank line, then a body explaining what and why, each paragraph on one unwrapped line, with no Co-Authored-By trailers. Never create, amend, or push commits unless asked.
-			- Never read, print, or commit secrets such as `.env` files, tokens, or private keys; refer to them by name.
-			- In repositories with `dev/vX.Y.Z` release branches, releases go through gh-release-flow (`gh release-flow start-dev vX.Y.Z`, `open-pr`, `merge`); never create tags or GitHub Releases by hand, and merge only when asked.
-		EOF
-	)
-	guidance_files=()
-	! selected codex || guidance_files+=("$codex_dir/AGENTS.md")
-	! selected claude || guidance_files+=("$claude_dir/CLAUDE.md")
 	for file in "${guidance_files[@]}"; do
 		mkdir -p "${file%/*}"
-		touch "$file"
-		# Both awk passes drop Windows line endings first, so markers in a CRLF file still match.
-		# A start marker not closed by a later end marker would make the rewrite drop the rest of the file.
-		if ! GUIDANCE_BEGIN=$guidance_begin GUIDANCE_END=$guidance_end awk '
-			{ sub(/\r$/, "") }
-			$0 == ENVIRON["GUIDANCE_BEGIN"] { open = 1 }
-			$0 == ENVIRON["GUIDANCE_END"] { open = 0 }
-			END { exit open }
-		' "$file"; then
+		if ! content=$(guidance_content "$file"); then
 			printf ' [NOTICE] %s has a linux-toolbox start marker but no end marker; left unchanged.\n' "$file" >&2
 			continue
 		fi
-		# Replace the block in place, or append it; drop loose copies of its rules left by older installers.
-		content=$(GUIDANCE_BEGIN=$guidance_begin GUIDANCE_END=$guidance_end GUIDANCE_RULES=$guidance_rules awk '
-			function block() {
-				print ENVIRON["GUIDANCE_BEGIN"]
-				for (i = 1; i <= n; i++) print rules[i]
-				print ENVIRON["GUIDANCE_END"]
-				done = 1
-			}
-			BEGIN {
-				n = split(ENVIRON["GUIDANCE_RULES"], rules, "\n")
-				for (i = 1; i <= n; i++) managed[rules[i]]
-			}
-			{ sub(/\r$/, "") }
-			$0 == ENVIRON["GUIDANCE_BEGIN"] { skip = 1; if (!done) block(); next }
-			skip { if ($0 == ENVIRON["GUIDANCE_END"]) skip = 0; next }
-			$0 in managed { next }
-			{ print; last = $0; printed = 1 }
-			END { if (!done) { if (printed && last != "") print ""; block() } }
-		' "$file")
 		printf '%s\n' "$content" >"$file"
 	done
 	ok "AI agent guidance configured"
@@ -320,48 +461,10 @@ fi
 
 if selected claude && [[ ${LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE:-0} != 1 ]]; then
 	info "Configuring Claude Code settings..."
-	settings="$claude_dir/settings.json"
-	lint_hook="$claude_dir/hooks/linux-toolbox-lint.sh"
 	mkdir -p "${lint_hook%/*}"
-	cat >"$lint_hook" <<'EOF'
-#!/usr/bin/env bash
-# Installed by linux-toolbox: lints the file Claude Code just edited.
-# Findings go to stderr with exit 2, which Claude reads; a missing tool or any other problem exits 0.
-file=$(jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
-[[ -f $file ]] || exit 0
-lint_shell() {
-	# SC1071: a .sh file for a shell ShellCheck cannot read, such as zsh.
-	! command -v shellcheck >/dev/null || shellcheck -e SC1091,SC1071 -- "$1"
-}
-case $file in
-*/.github/workflows/*.yml | */.github/workflows/*.yaml)
-	command -v actionlint >/dev/null || exit 0
-	# actionlint exits 1 for findings; other codes are its own errors.
-	findings=$(actionlint -no-color "$file" 2>&1) || [[ $? == 1 ]] || exit 0
-	;;
-*.sh | *.bash) findings=$(lint_shell "$file" 2>&1) ;;
-*)
-	head -n 1 -- "$file" | grep -Eq '^#!.*\b(ba|da)?sh\b' || exit 0
-	findings=$(lint_shell "$file" 2>&1)
-	;;
-esac
-[[ -n $findings ]] || exit 0
-printf 'linux-toolbox lint: fix these findings in %s\n%s\n' "$file" "$findings" >&2
-exit 2
-EOF
+	printf '%s\n' "$lint_hook_text" >"$lint_hook"
 	[[ -s $settings ]] || printf '{}\n' >"$settings"
-	# Adds missing rules without reordering yours, and replaces older linux-toolbox hooks instead of stacking them.
-	# attribution.commit "" stops Claude Code adding Co-Authored-By; the removal keeps dropping the older guard hook.
-	# jq reads the file from a pipe, which a sandboxed Snap jq can do even though it cannot open home files.
-	if updated=$(jq --arg lint "bash $(printf %q "$lint_hook")" '
-		def merge_rules($key; $rules): .permissions[$key] = ((.permissions[$key] // []) as $old | $old + ($rules - $old));
-		def without_ours: [(. // [])[] | del(.hooks[]? | select((.command // "") | test("/hooks/linux-toolbox-lint\\.sh|linux-toolbox: commits"))) | select(.hooks != [])];
-		merge_rules("deny"; ["Bash(git push:*)", "Bash(git tag:*)", "Bash(gh release create:*)"])
-		| merge_rules("ask"; ["Bash(git commit:*)", "Bash(gh pr merge:*)"])
-		| if .attribution == false then . else .attribution.commit //= "" | if .includeCoAuthoredBy == false then .attribution.pr //= "" else . end end
-		| .hooks.PreToolUse = (.hooks.PreToolUse | without_ours)
-		| .hooks.PostToolUse = (.hooks.PostToolUse | without_ours) + [{matcher: "Edit|Write|MultiEdit", hooks: [{type: "command", command: $lint}]}]
-	' < <(cat -- "$settings") 2>/dev/null) && [[ -n $updated ]]; then
+	if updated=$(settings_content) && [[ -n $updated ]]; then
 		printf '%s\n' "$updated" >"$settings"
 		ok "Claude Code settings configured"
 	else

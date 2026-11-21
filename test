@@ -2,17 +2,24 @@
 set -Eeuo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+# The installer's status tags, coloured only on a terminal and never with NO_COLOR set.
+if [[ -t 1 && -z ${NO_COLOR-} ]]; then
+	ok_tag=$'\033[90m[\033[38;5;154m  OK  \033[90m]\033[0m'
+	fail_tag=$'\033[90m[\033[91mFAILED\033[90m]\033[0m'
+else
+	ok_tag='[  OK  ]' fail_tag='[FAILED]'
+fi
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 # Most checks are bare commands that stop the run under set -e, so say which one failed.
-trap 'printf "not ok - %s, line %s: %s\n" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+trap 'printf " %s %s, line %s: %s\n" "$fail_tag" "${FUNCNAME[0]:-main}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # Keep the developer's own settings out of the checks. Under make test, the make variables would
 # turn the tests' own make runs into sub-makes that print "Entering directory".
-unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME MAKELEVEL MAKEFLAGS MFLAGS "${!LINUX_TOOLBOX_@}"
+unset SHELLCHECK_OPTS CLAUDE_CONFIG_DIR CODEX_HOME XDG_STATE_HOME MAKELEVEL MAKEFLAGS MFLAGS "${!LINUX_TOOLBOX_@}"
 : >"$test_dir/.shellcheckrc"
 
 pass() {
-	printf 'ok - %s\n' "$1"
+	printf ' %s %s\n' "$ok_tag" "$1"
 }
 
 test_installer_orchestration() {
@@ -34,15 +41,19 @@ EOF
 	for command in curl sudo git gh jq make go node npm npx codex claude shellcheck shfmt rg actionlint bwrap socat; do
 		ln -s mock "$root/bin/$command"
 	done
-	printf '%s\n' install-dependencies.sh install-go.sh install-node.sh \
-		install-shell-tools.sh install-release-flow.sh install-ai-tools.sh >"$root/expected"
+	# The AI script comes first: the menu asks it for the setup state, and its two steps reuse that copy.
+	printf '%s\n' install-ai-tools.sh install-dependencies.sh install-go.sh install-node.sh \
+		install-shell-tools.sh install-release-flow.sh >"$root/expected"
 
 	mkdir -p "$root/home/.local/bin"
 	output=$(MOCK_CURL_LOG="$root/remote" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash <install.sh)
 	grep -Fq 'Setup complete' <<<"$output"
 	# Without a terminal the Git item starts unchecked, since its setup asks questions.
-	grep -Eq '\[ \] 8\) Git identity and GitHub sign-in .*no identity, signed in to GitHub' <<<"$output"
+	grep -Eq '\[ \]  9\) Git identity and GitHub sign-in .*no identity, signed in to GitHub' <<<"$output"
+	# The downloaded stub prints no setup state, so the AI setup item shows it as unknown.
+	grep -Eq '\[x\]  8\) AI setup: skills, plugins, guidance, guardrails .*unknown' <<<"$output"
+	grep -Fq 'AI skills, plugins, guidance and guardrails set up' <<<"$output"
 	grep -Fq 'Git and GitHub setup skipped' <<<"$output"
 	grep -Fq 'Open a new terminal' <<<"$output"
 	grep -Fq 'gopls installed' <<<"$output"
@@ -52,7 +63,7 @@ EOF
 	# checked and runs both Git steps.
 	output=$(printf '\n' | MOCK_CURL_LOG="$root/interactive" PATH="$root/bin:$PATH" HOME="$root/home" \
 		timeout 20 script -qfec 'bash <install.sh' /dev/null)
-	grep -Fq '8) Git identity and GitHub sign-in' <<<"$output"
+	grep -Fq '9) Git identity and GitHub sign-in' <<<"$output"
 	grep -Fq 'Git identity configured' <<<"$output"
 	grep -Fq 'GitHub authentication configured' <<<"$output"
 	diff -u <(cat "$root/expected" && echo setup-git.sh) "$root/interactive"
@@ -74,7 +85,8 @@ EOF
 	done <"$root/expected"
 	MOCK_CURL_LOG="$root/unexpected-curl" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
-	diff -u <(sed 's/$/ 1/' "$root/expected") "$root/local.log"
+	# The AI script runs three times: for the menu's state, for the agents and for their setup.
+	diff -u <(sed 's/$/ 1/' "$root/expected" && printf 'install-ai-tools.sh 1\n%.0s' 1 2) "$root/local.log"
 	[[ ! -e $root/unexpected-curl ]]
 	# shellcheck disable=SC2016
 	path_line='export PATH="$HOME/.local/bin:$PATH"'
@@ -85,7 +97,7 @@ EOF
 	MOCK_CURL_LOG="$root/pinned" PATH="$root/bin:$PATH" HOME="$root/home" \
 		LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/local/install.sh" >/dev/null
 	diff -u "$root/expected" "$root/pinned"
-	pass 'installer uses remote scripts when piped or pinned, local scripts from a checkout, and runs Git setup only when checked'
+	pass 'installer: script sources and Git setup selection'
 }
 
 test_node_installer() {
@@ -159,7 +171,7 @@ EOF
 			grep -Fq 'install --lts' "$home/.nvm/calls"
 		fi
 	done
-	pass 'Node installer selects LTS quietly, keeps a custom nvm default unless confirmed, and replaces a Node.js it cannot use'
+	pass 'Node: LTS install, nvm default, unusable Node replaced'
 }
 
 test_dependency_output() (
@@ -207,7 +219,7 @@ test_dependency_output() (
 	[[ $PKG_MGR == dnf ]]
 	pkg_install make >/dev/null
 	[[ $(tail -n 1 "$log") == 'dnf install -y -q --best make' ]]
-	pass 'system dependencies report each package, hide successful manager output, wait for the apt lock, and use dnf on RHEL'
+	pass 'system packages: per-package report, apt lock wait, dnf'
 )
 
 test_go_installer() {
@@ -267,7 +279,7 @@ EOF
 	output=$(GO_TARBALL="$root/go.tar.gz" PATH="$path" LINUX_TOOLBOX_NONINTERACTIVE=1 bash "$root/install-go.sh")
 	grep -Fq 'Kept the existing Go setup' <<<"$output"
 	[[ ! -e $root/usr/local/bin/go ]]
-	pass 'Go installer links the latest Go and keeps a Go the user installed'
+	pass 'Go: latest linked, user install kept'
 }
 
 test_shell_tools() {
@@ -332,7 +344,7 @@ EOF
 			bash install-shell-tools.sh >/dev/null 2>&1 || status=$?
 		[[ $status != 0 && ! -e $root/bad/${command%%[-_]*} ]]
 	done
-	pass 'shell tools install from GitHub releases and reject a download that fails its checksum'
+	pass 'shell tools: GitHub releases, checksum enforced'
 }
 
 test_ubuntu_cleanup() {
@@ -378,7 +390,7 @@ EOF
 	# Names dpkg does not know (gnome-software-plugin-snap here) are left out instead of failing the purge.
 	grep -Fqx 'apt-get -o DPkg::Lock::Timeout=300 purge -y snapd apport multipath-tools kdump-tools landscape-common' "$root/log"
 	[[ -e $fs/etc/apt/preferences.d/nosnap.pref && -e $fs/etc/cloud/cloud-init.disabled ]]
-	pass 'Ubuntu cleanup removes only snap folders, guards WSL packages, and pins snapd away'
+	pass 'Ubuntu cleanup: snap folders, WSL guard, snapd pin'
 }
 
 test_release_flow() {
@@ -442,7 +454,7 @@ EOF
 	output=$(GH_LOG="$root/gh.log" PATH="$root/bin:$PATH" HOME="$root/my home" bash install-release-flow.sh)
 	grep -Fq 'skipped the Make targets' <<<"$output"
 	[[ ! -e "$root/my home/.config/make/release-flow.mk" ]]
-	pass 'release-flow installer installs or upgrades the extension, runs setup-make, notices once, replaces its old targets, and keeps a custom Make file'
+	pass 'release-flow: extension, Make targets, custom file kept'
 }
 
 test_ai_tools() {
@@ -529,12 +541,33 @@ EOF
 	grep -Fq 'claude plugin install superpowers@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install frontend-design@claude-plugins-official --yes' "$root/agents.log"
 	grep -Fq 'claude plugin install claude-code-setup@claude-plugins-official --yes' "$root/agents.log"
-	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 13 ]]
-	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 13 ]]
+	[[ $(wc -l <"$root/home/.codex/AGENTS.md") == 15 ]]
+	[[ $(wc -l <"$root/home/.claude/CLAUDE.md") == 15 ]]
 	settings="$root/home/.claude/settings.json"
 	[[ $(jq -c '[.permissions.deny, .permissions.ask, (.hooks.PreToolUse | length), (.hooks.PostToolUse | length)]' "$settings") == '[["Bash(git push:*)","Bash(git tag:*)","Bash(gh release create:*)"],["Bash(git commit:*)","Bash(gh pr merge:*)"],0,1]' ]]
-	# Claude Code's own setting keeps Co-Authored-By out of commits.
-	[[ $(jq -c '.attribution' "$settings") == '{"commit":""}' ]]
+	# Claude Code's own setting keeps Co-Authored-By out of commits and its footer out of pull requests.
+	[[ $(jq -c '.attribution' "$settings") == '{"commit":"","pr":""}' ]]
+	# --status reads skills and plugins from the files their own tools keep, which the fakes do not write.
+	status_of() { PATH="$path" HOME="$root/home" bash install-ai-tools.sh --status "$@"; }
+	[[ $(status_of) == 'to update: skills, plugins' ]]
+	mkdir -p "$root/home/.agents" "$root/home/.claude/plugins"
+	sed -E 's/.*#([0-9a-f]{40}) .* --skill (.*) --yes$/\1 \2/' "$root/npx.log" |
+		jq -Rn '{skills: [inputs | split(" ") | .[0] as $ref | .[1:][] | {key: ., value: {ref: $ref}}] | from_entries}' \
+			>"$root/home/.agents/.skill-lock.json"
+	jq -n '{plugins: ($ARGS.positional | map({key: "\(.)@claude-plugins-official", value: [{scope: "user"}]}) | from_entries)}' \
+		--args gopls-lsp typescript-lsp superpowers frontend-design claude-code-setup >"$root/home/.claude/plugins/installed_plugins.json"
+	[[ $(status_of) == current ]]
+	# A skill at another commit, an edited rule and a removed setting are each reported, and nothing is changed.
+	jq '.skills["golang-lint"].ref = "0000"' "$root/home/.agents/.skill-lock.json" >"$root/lock.json"
+	mv "$root/lock.json" "$root/home/.agents/.skill-lock.json"
+	sed -i 's/^- Never read, print, or commit secrets/- Never read secrets/' "$root/home/.claude/CLAUDE.md"
+	jq 'del(.attribution.pr)' "$settings" >"$root/settings.json"
+	mv "$root/settings.json" "$settings"
+	output=$(find "$root/home" -type f -exec cksum {} +)
+	[[ $(status_of) == 'to update: skills, guidance, guardrails' ]]
+	[[ $(status_of codex) == 'to update: skills' ]]
+	[[ $(LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 status_of claude) == 'to update: skills' ]]
+	[[ $(find "$root/home" -type f -exec cksum {} +) == "$output" ]]
 	# The lint hook reports shell findings with exit 2 and stays quiet for clean or unrelated files.
 	hook="$root/home/.claude/hooks/linux-toolbox-lint.sh"
 	shellcheck "$hook"
@@ -567,7 +600,7 @@ EOF
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh claude 2>&1)
 	grep -Fq 'settings.json is not valid JSON; Claude Code settings left unchanged' <<<"$output"
 	[[ $(<"$settings") == 'not json' ]]
-	pass 'AI tools stay themed, global, non-interactive, and write concise guidance'
+	pass 'AI tools: theme, global install, guidance, settings'
 
 	rm -rf "${root:?}/home" "$root/agents.log" "$root/npx.log" "$root/bin/claude"
 	mkdir -p "$root/home/.claude"
@@ -593,7 +626,7 @@ EOF
 	[[ ! -e $root/home/.codex ]]
 	[[ $(head -n 1 "$claude_md") == '# My notes' && $(tail -n 1 "$claude_md") == '# More notes' ]]
 	[[ $(grep -Fcx -- "$begin" "$claude_md") == 1 && $(grep -Fc 'When spawning a subagent' "$claude_md") == 1 ]]
-	[[ $(wc -l <"$claude_md") == 15 ]]
+	[[ $(wc -l <"$claude_md") == 17 ]]
 	if grep -Fq 'stale rule' "$claude_md"; then
 		return 1
 	fi
@@ -621,7 +654,7 @@ EOF
 		return 1
 	fi
 	printf '%s\n' "$begin" '- keep me' >"$root/home/.codex/AGENTS.md"
-	[[ $(wc -l <"$claude_md") == 15 ]]
+	[[ $(wc -l <"$claude_md") == 17 ]]
 	grep -Fq 'Claude Code 1.2.3 is already up to date' <<<"$output"
 	grep -Fq 'Codex 1.2.3 is already up to date' <<<"$output"
 	if grep -Eq 'Installing or updating (Claude Code|Codex)' <<<"$output"; then
@@ -668,7 +701,31 @@ EOF
 	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 \
 		PATH="$path" HOME="$root/home" bash install-ai-tools.sh >/dev/null
 	[[ ! -e $root/home/.claude && ! -e $root/home/.codex ]]
-	pass 'AI tools install only the selected agent and skip it when up to date'
+	# --cli installs only the agents.
+	rm -rf "${root:?}/home" "$root/bin/claude" "$root/agents.log" "$root/npx.log"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh --cli >/dev/null
+	[[ -x $root/bin/claude && -x $root/home/.local/bin/codex && ! -e $root/npx.log ]]
+	[[ ! -e $root/home/.claude && ! -e $root/home/.codex ]]
+	if grep -Fq 'claude plugin' "$root/agents.log"; then
+		return 1
+	fi
+	# --setup configures an installed agent without installing anything, and refuses a missing one.
+	: >"$root/agents.log"
+	AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh --setup claude >/dev/null
+	[[ -s $root/npx.log && -s $root/home/.claude/CLAUDE.md && ! -e $root/home/.codex ]]
+	grep -Fq 'claude plugin install superpowers@claude-plugins-official --yes' "$root/agents.log"
+	if grep -Fq 'sudo' "$root/agents.log"; then
+		return 1
+	fi
+	rm -f "$root/bin/claude"
+	if output=$(AI_LOG="$root/agents.log" NPX_LOG="$root/npx.log" INSTALLER_LOG="$root/installers.log" \
+		PATH="$path" HOME="$root/home" bash install-ai-tools.sh --setup claude 2>&1); then
+		return 1
+	fi
+	grep -Fq 'claude is not installed' <<<"$output"
+	pass 'AI tools: selected agent only, skipped when current, agents and setup apart'
 }
 
 test_git_setup_modes() {
@@ -700,15 +757,13 @@ EOF
 	if grep -Fq 'git config --global user.' "$root/github.log"; then
 		return 1
 	fi
-	pass 'Git identity and GitHub authentication run independently'
+	pass 'Git setup: identity and GitHub auth independent'
 }
 
-test_installer_orchestration
-test_node_installer
-test_dependency_output
-test_go_installer
-test_shell_tools
-test_ubuntu_cleanup
-test_release_flow
-test_ai_tools
-test_git_setup_modes
+tests=(test_installer_orchestration test_node_installer test_dependency_output test_go_installer test_shell_tools
+	test_ubuntu_cleanup test_release_flow test_ai_tools test_git_setup_modes)
+for run in "${tests[@]}"; do
+	"$run"
+done
+# A failed check stops the run, so reaching this line means every pass line above was printed.
+printf '\n %s passed in %ss\n' "$(grep -c "^[[:space:]]*pass '" "${BASH_SOURCE[0]}")" "$SECONDS"

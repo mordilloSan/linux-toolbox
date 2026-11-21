@@ -16,6 +16,7 @@ readonly LINE=' ─────────────────────�
 
 base_url=https://raw.githubusercontent.com/mordilloSan/linux-toolbox/main
 script_dir=
+ai_tools_script=
 # Only a checkout runs its sibling scripts; a release copy (base_url rewritten) always runs its own release's.
 if [[ $base_url == */main && -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
 	script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -106,25 +107,36 @@ read_git_state() {
 
 # Show every component with its detected state, then read the selection.
 choose_components() {
-	local keys labels states i release='' git_state='' git_ready=0 interactive=1
-	keys=(packages go node shell release claude codex git)
+	local keys labels states i agent release='' ai_state='no agent installed' ai_agents=() git_state='' git_ready=0 interactive=1
+	keys=(packages go node shell release claude codex aisetup git)
 	labels=('System packages: git, gh, make, tar' Go 'Node.js LTS through nvm'
 		'Shell tools: jq, ShellCheck, rg, shfmt' 'GitHub release flow' 'Claude Code' 'Codex CLI'
-		'Git identity and GitHub sign-in')
+		'AI setup: skills, plugins, guidance, guardrails' 'Git identity and GitHub sign-in')
 	# 'gh extension list' needs a login; the extension's own help does not.
 	if command -v gh >/dev/null && gh release-flow --help >/dev/null 2>&1 </dev/null; then
 		release=installed
 	fi
+	# The AI script knows what its setup installs, so it reports whether an installed agent has it all.
+	for agent in claude codex; do
+		! command -v "$agent" >/dev/null || ai_agents+=("$agent")
+	done
+	if ((${#ai_agents[@]})); then
+		ai_tools_script=$(load_script install-ai-tools.sh 2>/dev/null) || ai_tools_script=
+		ai_state=$(bash -c "$ai_tools_script" -- --status "${ai_agents[@]}" 2>/dev/null </dev/null) || ai_state=
+		[[ -n $ai_tools_script && -n $ai_state ]] || ai_state=unknown
+	fi
 	read_git_state
 	# GOTOOLCHAIN=local: show the installed Go, not a toolchain that a project in this folder asks for.
+	# The agents print their name around the version; the label already says it.
 	states=(
 		"$(installed_state git gh make tar)"
 		"$(GOTOOLCHAIN=local version_state go env GOVERSION)"
 		"$(version_state node --version)"
 		"$(installed_state jq shellcheck shfmt rg actionlint)"
 		"${release:-not installed}"
-		"$(version_state claude --version)"
-		"$(version_state codex --version)"
+		"$(version_state claude --version | sed 's/ (Claude Code)$//')"
+		"$(version_state codex --version | sed 's/^codex-cli //')"
+		"$ai_state"
 		"$git_state"
 	)
 	if grep -Eq '^ID="?ubuntu"?$' /etc/os-release 2>/dev/null; then
@@ -141,12 +153,12 @@ choose_components() {
 		interactive=0
 	fi
 	# Git setup asks on the terminal, so it starts checked only when something is missing and someone can answer.
-	((interactive && ! git_ready)) || picked[7]=0
+	((interactive && ! git_ready)) || picked[8]=0
 
 	if ((! interactive)); then
 		printf '\n %s[?]%s Components to install or update:\n' "$YELLOW" "$RESET"
 		for i in "${!keys[@]}"; do
-			printf '     %s %d) %-47s %s%s%s\n' "$( ((picked[i])) && echo '[x]' || echo '[ ]')" \
+			printf '     %s %2d) %-47s %s%s%s\n' "$( ((picked[i])) && echo '[x]' || echo '[ ]')" \
 				$((i + 1)) "${labels[i]}" "$GREY" "${states[i]}" "$RESET"
 		done
 	else
@@ -174,7 +186,7 @@ pick_components() {
 		drawn=1
 		frame+=$'\033[?7l'
 		for i in "${!keys[@]}"; do
-			frame+=$(printf '\r\033[K   %s %s %d) %-47s %s%s%s\n' \
+			frame+=$(printf '\r\033[K   %s %s %2d) %-47s %s%s%s\n' \
 				"$( ((i == cursor)) && printf '%s>%s' "$GREEN" "$RESET" || echo ' ')" \
 				"$( ((picked[i])) && printf '%s[x]%s' "$GREEN" "$RESET" || echo '[ ]')" \
 				$((i + 1)) "${labels[i]}" "$GREY" "${states[i]}" "$RESET")$'\n'
@@ -185,7 +197,9 @@ pick_components() {
 		case $key in
 		'') break ;;
 		' ') picked[cursor]=$((! picked[cursor])) ;;
-		[1-9])
+		[0-9])
+			# 0 is the tenth item.
+			((key)) || key=10
 			if ((key <= count)); then
 				cursor=$((key - 1))
 				picked[cursor]=$((! picked[cursor]))
@@ -245,6 +259,7 @@ for component in packages go node shell release; do
 	! selected "$component" || ((++step_total))
 done
 ((${#agents[@]} == 0)) || ((++step_total))
+! selected aisetup || ((++step_total))
 # sudo resets the environment, so pass the prompt mode and any proxy settings on explicitly.
 root_env=("LINUX_TOOLBOX_NONINTERACTIVE=${LINUX_TOOLBOX_NONINTERACTIVE:-0}")
 for var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
@@ -296,14 +311,34 @@ if selected release; then
 	ok "GitHub release flow installed"
 fi
 
+if ((${#agents[@]})) || selected aisetup; then
+	# Already loaded when the menu asked it for the setup state.
+	[[ -n $ai_tools_script ]] || ai_tools_script=$(load_script install-ai-tools.sh)
+fi
+
 if ((${#agents[@]})); then
-	run_step "AI tools and skills"
-	ai_tools_script=$(load_script install-ai-tools.sh)
-	if ! bash -c "$ai_tools_script" -- "${agents[@]}" </dev/null; then
-		fail "Unable to install AI tools and skills."
+	run_step "AI tools"
+	if ! bash -c "$ai_tools_script" -- --cli "${agents[@]}" </dev/null; then
+		fail "Unable to install AI tools."
 	fi
-	ok "AI tools and skills installed"
+	ok "AI tools installed"
 	commands+=("${agents[@]}" bwrap socat)
+fi
+
+if selected aisetup; then
+	run_step "AI setup"
+	# For the agents installed above and those that were already there.
+	setup_agents=()
+	for agent in claude codex; do
+		! command -v "$agent" >/dev/null || setup_agents+=("$agent")
+	done
+	if ((${#setup_agents[@]} == 0)); then
+		notice "No AI agent is installed; AI setup skipped."
+	elif ! bash -c "$ai_tools_script" -- --setup "${setup_agents[@]}" </dev/null; then
+		fail "Unable to set up the AI tools."
+	else
+		ok "AI skills, plugins, guidance and guardrails set up"
+	fi
 fi
 
 # Before the check, so a kept Snap tool that the cleanup removes is reported missing.

@@ -12,7 +12,7 @@ An opinionated installer for turning a fresh Linux environment into a ready-to-u
 | System | Git, GitHub CLI, Make, archive utilities, and `awk` when missing |
 | Runtimes | Latest Go with `gopls`, and latest Node.js LTS through NVM with `typescript-language-server` |
 | Shell | ShellCheck, shfmt, jq, ripgrep, and actionlint |
-| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), interface skills, `find-skills`, and selected Go skills for each selected agent. On apt and dnf systems Claude Code comes from Anthropic's signed package repository (the `latest` channel, or `stable` when `autoUpdatesChannel` is `stable` in `~/.claude/settings.json`), so system upgrades update it; a copy from the native installer is replaced. Other systems get the native installer. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence, and the `superpowers`, `frontend-design` and `claude-code-setup` plugins from the same marketplace (not pinned either). The skills are pinned to reviewed commits. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
+| AI (optional) | Claude Code and/or Codex CLI, with Bubblewrap and socat for the agent sandbox (on Ubuntu 24.04 it also needs [an AppArmor profile](https://code.claude.com/docs/en/sandboxing#add-an-apparmor-profile-for-bubblewrap); the installer says so when it does), interface skills, `find-skills`, and selected Go skills for each selected agent. On apt and dnf systems Claude Code comes from Anthropic's signed package repository (the `latest` channel, or `stable` when `autoUpdatesChannel` is `stable` in `~/.claude/settings.json`), so system upgrades update it; a copy from the native installer is replaced. Other systems get the native installer. `context-handoff` is installed only with Codex. Claude Code also gets Anthropic's official `gopls-lsp` and `typescript-lsp` plugins (not pinned), which give it Go and TypeScript code intelligence, and the `superpowers`, `frontend-design` and `claude-code-setup` plugins from the same marketplace (not pinned either). The skills are pinned to reviewed commits. Claude Code also gets git guardrails (deny rules for the usual `git push`, `git tag` and `gh release create` commands, approval before `git commit` and `gh pr merge`, no Co-Authored-By trailers and no Claude Code footer on pull requests; other spellings such as `git -C dir push` are not matched) and a hook that lints shell scripts and workflows after each edit. |
 | Releases | `gh-release-flow` and user-wide `make` targets |
 
 The installer supports x86-64 and ARM64 on Ubuntu, Debian, Fedora, and RHEL 8 or newer (and compatible) distributions using `apt` or `dnf`.
@@ -36,18 +36,21 @@ The installer asks for `sudo` before making system changes. It starts with a men
 ```text
  [?] Components to install or update
      Up/Down move, Space or number toggles, Enter installs
-   > [x] 1) System packages: git, gh, make, tar             installed
-     [x] 2) Go                                              go1.27.2
-     [x] 3) Node.js LTS through nvm                         v24.21.0
-     [x] 4) Shell tools: jq, ShellCheck, rg, shfmt          installed
-     [x] 5) GitHub release flow                             not installed
-     [x] 6) Claude Code                                     2.1.296 (Claude Code)
-     [x] 7) Codex CLI                                       not installed
-     [ ] 8) Git identity and GitHub sign-in                 Jane Doe, GitHub janedoe
-     [ ] 9) Ubuntu cleanup: remove Snaps and all Snap data  Snap present
+   > [x]  1) System packages: git, gh, make, tar             installed
+     [x]  2) Go                                              go1.27.2
+     [x]  3) Node.js LTS through nvm                         v24.21.0
+     [x]  4) Shell tools: jq, ShellCheck, rg, shfmt          installed
+     [x]  5) GitHub release flow                             not installed
+     [x]  6) Claude Code                                     2.1.296
+     [x]  7) Codex CLI                                       not installed
+     [x]  8) AI setup: skills, plugins, guidance, guardrails to update: skills, guidance
+     [ ]  9) Git identity and GitHub sign-in                 Jane Doe, GitHub janedoe
+     [ ] 10) Ubuntu cleanup: remove Snaps and all Snap data  Snap present
 ```
 
-Components 1 to 7 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it. Enter installs the checked items. Git setup starts checked only when the Git name or email is missing or the GitHub CLI is not signed in; when checked, it runs both parts of [Git and GitHub setup](#git-and-github-setup) after the installs. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection, with Git setup unchecked.
+Components 1 to 8 start checked. Move with the arrow keys and toggle with Space, or press an item's number to toggle it (0 for item 10). Enter installs the checked items.
+
+Items 6 and 7 install or update only the agents. Item 8 sets up the agents that are installed: their skills, the Claude Code plugins, the guidance block and the Claude Code settings. Its state reads `current`, or `to update:` with the parts that are missing or differ from what this version installs; ticking it brings them up to date without reinstalling an agent. Skills are compared with their pinned commits, the guidance and settings with what the installer would write. Plugins are not pinned, so they count as current once installed. The state is `no agent installed` when neither agent is present, and `unknown` when it could not be read. Git setup starts checked only when the Git name or email is missing or the GitHub CLI is not signed in; when checked, it runs both parts of [Git and GitHub setup](#git-and-github-setup) after the installs. The cleanup appears only on Ubuntu and starts unchecked. Without a terminal, the installer prints the list and uses the default selection, with Git setup unchecked.
 
 Installed components are updated in place. Before a step replaces something you may have set up yourself, it asks first, and the default answer keeps what you have:
 
@@ -79,7 +82,7 @@ LINUX_TOOLBOX_SKIP_AGENT_GUIDANCE=1 bash install.sh
 
 Without this option, each run adds back those git rules if you removed them.
 
-Skip the menu and the installer's own questions (sudo may still ask for your password; with no terminal it needs passwordless or recently cached sudo). This installs or updates components 1 to 7, keeps anything you set up yourself, and skips Git setup and the Ubuntu cleanup:
+Skip the menu and the installer's own questions (sudo may still ask for your password; with no terminal it needs passwordless or recently cached sudo). This installs or updates components 1 to 8, keeps anything you set up yourself, and skips Git setup and the Ubuntu cleanup:
 
 ```bash
 LINUX_TOOLBOX_NONINTERACTIVE=1 bash install.sh
@@ -90,6 +93,13 @@ Install the AI tools for a single agent directly (Node.js and jq must already be
 ```bash
 ./install-ai-tools.sh claude
 ./install-ai-tools.sh codex
+```
+
+Add `--cli` to install only the agent, `--setup` to set up an agent that is already installed, or `--status` to print the setup state that the menu shows without changing anything:
+
+```bash
+./install-ai-tools.sh --status
+./install-ai-tools.sh --setup claude
 ```
 
 ## Git and GitHub setup
