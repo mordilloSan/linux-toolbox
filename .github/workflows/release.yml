@@ -10,10 +10,6 @@ permissions:
   contents: write
   pull-requests: read
 
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 jobs:
   release:
     name: Publish scripts
@@ -22,6 +18,11 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'dev/v')
+    # Every closed PR starts this workflow, so the queue is on the job: a skipped
+    # job never joins it and cannot cancel a release that is waiting.
+    concurrency:
+      group: ${{ github.workflow }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
